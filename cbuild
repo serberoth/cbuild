@@ -121,8 +121,9 @@ def build properties, verbose
     properties.source_dirs.each do |dir|
         Dir.each_child(dir) do |name|
             next if name == '.' || name == '..'
+            # TODO: This does not handle folders within the source directory correctly
+            next if File.directory? "#{dir}/#{name}"
             extension = File.extname name
-            # TODO: Use properties.source_filters here instead of this extension check
             if properties.source_filters.length == 0
                 puts "Reviewing: #{dir}/#{name}".cyan if verbose
                 next if [ '.h', '.o', '.swp', '.sh', '.bat', '.cmd', '.ps1' ].include? extension
