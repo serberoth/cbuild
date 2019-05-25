@@ -1,0 +1,25 @@
+{
+    // 'target' is the name of the output executable
+    "target": "sample",
+    // 'output' is the build target output directory
+    "output": "./build",
+    // 'cc' defines which compiler to invoke during the compilation process
+    "cc": "clang",
+    // 'ld' defines which linker to invoke during the linking stage
+    "ld": "lld",
+    // 'language' defines which language standard to use during compilation
+    "language": "c17",
+    // 'sources' is an array containing a set of folders with source for the project to be compiled
+    "sources": [ "src" ],
+    // 'filters' is an array of regular expressions to filter source files in the specified folders
+    // The regular expression filters define which files are accepted into the compilation phase
+    "filters": [ ".*\\.c" ],
+    // 'compiler.options' is an array of options passed directly to the compiler during the compilation phase
+    "compiler.options": [
+        "-g", "-Wall", "-O3"
+    ],
+    // 'linker.options' is an array of options passed directly to the linker during the linking stage
+    "linker.options": [
+        "-lm64"
+    ]
+}
