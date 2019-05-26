@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'fileutils'
+require 'find'
 require 'json'
 
 class String
@@ -34,6 +35,7 @@ class Flags
     attr_accessor :default_flag
     attr_accessor :verbose_flag
     attr_accessor :properties_file
+    attr_accessor :build_mode
 
     def initialize(arguments)
         self.build_flag = false
@@ -42,6 +44,7 @@ class Flags
         self.default_flag = true
         self.verbose_flag = false
         self.properties_file = 'build.json'
+        self.build_mode = 'release'
 
         arguments.each do |item|
             case item
@@ -51,6 +54,10 @@ class Flags
             when 'build'
                 self.build_flag = true
                 self.default_flag = false
+            when /build:(.*)/
+                self.build_flag = true
+                self.build_mode = $1
+                self.default_flag = false
             when 'tasks'
                 self.tasks_flag = true
             when /-f=(.*)/
@@ -58,106 +65,196 @@ class Flags
             when '-verbose'
                 self.verbose_flag = true
             else
-                puts "Invalid parameter option #{item.white.bold}"
+                puts "#{'ERROR'.red}: Invalid parameter option #{item.white.bold}"
                 self.tasks_flag = true
             end
         end
     end
 
+    def print_tasks
+        puts 'Build System Tasks:'
+        puts 'clean - Clean the build directory'
+        puts 'build - Build the target executable'
+        puts 'build:<mode> - Build the specified target mode'
+        puts 'tasks - Print the build tasks list'
+        puts '-f=<filename> - Use <filename> for the build project properties'
+        puts '-verbose - Enable verbose output'
+        exit! 0
+    end
+        
 end
 
-class BuildProperties
-    attr_accessor :target, :output
+class Builder
+    attr_accessor :target, :output, :mode
     attr_accessor :source_dirs, :source_filters
-    attr_accessor :compiler, :compiler_options
-    attr_accessor :linker, :linker_options
+    attr_accessor :compiler, :compiler_options, :compiler_mode_options
+    attr_accessor :linker, :linker_options, :linker_mode_options
     attr_accessor :language
+    attr_accessor :prebuild, :postbuild
 
-    def initialize(properties)
-        self.target = properties['target'] || 'output'
-        self.output = properties['output'] || './build'
-
-        self.compiler = properties['cc'] || 'cc'
-        self.linker = properties['ld'] || 'ld'
-        self.language = properties['language'] || 'c17'
-        
-        self.source_dirs = properties['sources'] || [ './' ]
-        self.source_filters = properties['filters'] || []
-        
-        self.compiler_options = properties['compiler.options'] || []
-        self.linker_options = properties['linker.options'] || []
-    end
-
-end
-
-
-
-def tasks
-    puts 'Build System Tasks:'
-    puts 'clean - Clean the build directory'
-    puts 'build - Build the target executable'
-    puts 'tasks - Print the build tasks list'
-    puts '-f=<filename> - Use <filename> for the build project properties'
-    puts '-verbose - Enable verbose output'
-    exit! 0
-end
-
-def clean properties
-    puts 'Cleaning build directory'
-    FileUtils.rm_r properties.output if File.exists? properties.output
-    puts "#{'SUCCESS'.green} - Project build directory cleaned"
-end
-
-def build properties, verbose
-    FileUtils.mkdir_p "#{properties.output}/objs"
-    FileUtils.mkdir_p "#{properties.output}/exec"
-
-    File.delete "#{properties.output}/exec/#{properties.target}" if File.exists? "#{properties.output}/exec/#{properties.target}"
-
-    include_dirs = properties.source_dirs.map {|dir| "-I#{dir}" }.join ' '
-    puts "Include Directories: #{include_dirs}".cyan if verbose
-
-    count = 0
-    properties.source_dirs.each do |dir|
-        Dir.each_child(dir) do |name|
-            next if name == '.' || name == '..'
-            # TODO: This does not handle folders within the source directory correctly
-            next if File.directory? "#{dir}/#{name}"
-            extension = File.extname name
-            if properties.source_filters.length == 0
-                puts "Reviewing: #{dir}/#{name}".cyan if verbose
-                next if [ '.h', '.o', '.swp', '.sh', '.bat', '.cmd', '.ps1' ].include? extension
-                next unless [ '.c', '.cpp', '.cxx', '.c++' ].include? extension
-            else
-                match = false
-                properties.source_filters.each do |filter|
-                    puts "Reviewing: #{dir}/#{name} => #{filter} -> #{name} :: #{name.match? Regexp.new(filter)}".cyan if verbose
-                    match ||= name.match? Regexp.new(filter)
-                end
-                next unless match
-            end
-
-            basename = File.basename(name, extension)
-
-            puts "#{'Compiling'.blue}: " + "#{dir}/#{name}".white.bold
-            puts "#{properties.compiler} -c -o #{properties.output}/objs/#{basename}.o #{dir}/#{name} -std=#{properties.language} #{properties.compiler_options.join(' ')} #{include_dirs}".cyan if verbose
-            puts %x{ #{properties.compiler} -c -o #{properties.output}/objs/#{basename}.o #{dir}/#{name} -std=#{properties.language} #{properties.compiler_options.join(' ')} #{include_dirs} }
-            count += 1
+    def initialize(flags)
+        if !File.exists? flags.properties_file
+            puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in the current directory."
+            puts "Please make sure you are in the correct project directory and are specifying the correct project file."
+            exit -1
         end
+
+        begin
+            @properties = JSON.parse(File.read(flags.properties_file))
+        rescue JSON::JSONError => e
+            puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
+            puts "#{'ERROR'.red}: #{e.message}"
+            exit -1
+        end
+        @flags = flags
+
+        self.target = @properties['target'] || 'output'
+        self.output = @properties['output'] || './build'
+        self.mode = flags.build_mode
+        if self.mode == 'global'
+            self.mode = 'release'
+        end
+
+        self.compiler = @properties['cc'] || 'cc'
+        self.linker = @properties['ld'] || 'ld'
+        self.language = @properties['language'] || 'c17'
+
+        self.source_dirs = @properties['sources'] || [ './' ]
+        self.source_filters = @properties['filters'] || []
+        
+        self.compiler_options = []
+        self.compiler_mode_options = []
+        if !@properties['compiler.options'].nil?
+            if @properties['compiler.options'].class == Array
+                self.compiler_options = @properties['compiler.options'] || []
+                self.compiler_mode_options = @properties["compiler.#{mode}.options"] || []
+            elsif @properties['compiler.options'].class == Hash
+                self.compiler_options = @properties['compiler.options']['global'] || []
+                self.compiler_mode_options = @properties['compiler.options'][mode] || []
+            end
+        end
+        
+        self.linker_options = []
+        self.linker_mode_options = []
+        if !@properties['linker.options'].nil?
+            if @properties['linker.options'].class == Array
+                self.linker_options = @properties['linker.options'] || []
+                self.linker_mode_options = @properties["linker.#{mode}.options"] || []
+            elsif @properties['linker.options'].class == Hash
+                self.linker_options = @properties['linker.options']['global'] || []
+                self.linker_mode_options = @properties['linker.options'][mode] || []
+            end
+        end
+
+        self.prebuild = @properties['prebuild'] || []
+        self.postbuild = @properties['postbuild'] || []
     end
 
-    object_list = Dir.each_child("#{properties.output}/objs").select {|name| '.o' == File.extname(name).downcase }
-            .map {|name| "#{properties.output}/objs/#{name}" }
-    objects = object_list.join ' '
-    puts "Objects: #{objects}".cyan if verbose
-    if object_list.length > 0 && object_list.length == count
-        puts "#{'Linking Target'.yellow}: #{properties.target.white.bold}"
-        puts "#{properties.linker} -o #{properties.output}/exec/#{properties.target} #{objects} #{properties.linker_options.join(' ')}".cyan if verbose
-        puts %x{ #{properties.linker} -o #{properties.output}/exec/#{properties.target} #{objects} #{properties.linker_options.join(' ')} }
+    def clean
+        puts 'Cleaning build directory'
+        FileUtils.rm_r self.output if File.exists? self.output
+        puts "#{'SUCCESS'.green} - Project build directory cleaned"
     end
 
-    puts "#{'SUCCESS'.green} - Build completed successfully" if File.exists? "#{properties.output}/exec/#{properties.target}"
-    puts "#{'FAILED'.red} - See compilation output for details" unless File.exists? "#{properties.output}/exec/#{properties.target}"
+    def build
+        exec_prebuild
+        result = assemble
+        exec_postbuild
+
+        puts "#{'SUCCESS'.green} - Build completed successfully" if File.exists? "#{self.output}/exec/#{self.target}" if result
+    end
+
+private
+    def exec_prebuild
+        build_commands self.prebuild, 'Prebuild'
+    end
+
+    def exec_postbuild
+        build_commands self.postbuild, 'Postbuild'
+    end
+
+    def assemble
+        puts "Assembling #{self.mode.white.bold} target"
+        verbose = @flags.verbose_flag
+        FileUtils.mkdir_p "#{self.output}/objs"
+        FileUtils.mkdir_p "#{self.output}/exec"
+
+        File.delete "#{self.output}/exec/#{self.target}" if File.exists? "#{self.output}/exec/#{self.target}"
+
+        include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
+        puts "Include Directories: #{include_dirs}".cyan if verbose
+
+        source_list = []
+        object_list = []
+        self.source_dirs.each do |dir|
+            Find.find(dir) do |path|
+                next if filter? path
+
+                extension = File.extname(path)
+                basename = File.basename(path, extension)
+
+                object = "#{self.output}/objs/#{basename}.o"
+                options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
+                puts "#{'Compiling'.blue}: #{path.white.bold} -> #{object.white.bold}"
+                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} #{options} #{include_dirs}"
+                puts command.cyan if verbose
+                puts %x{ #{command} }
+                source_list.append path
+                object_list.append object if $?.exited? && ($?.exitstatus == 0)
+            end
+        end
+
+        if (object_list.length > 0) && (object_list.length == source_list.length)
+            puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
+            options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
+            command = "#{self.linker} -o #{self.output}/exec/#{self.target} #{object_list.join(' ')} #{options}"
+            puts command.cyan if verbose
+            puts %x{ #{command} }
+        end
+
+        puts "#{'FAILED'.red} - See compilation output for details" unless File.exists? "#{self.output}/exec/#{self.target}"
+        true
+    end
+
+    def filter? name
+        verbose = @flags.verbose_flag
+
+        if name == '.' || name == '..' || File.directory?(name)
+            return true
+        end
+
+        # Filter the files in the source directory
+        if self.source_filters.length == 0
+            puts "Reviewing: #{name}".cyan if verbose
+            extension = File.extname name
+            return true if [ '.h', '.o', '.swp', '.sh', '.bat', '.cmd', '.ps1' ].include? extension
+            return true unless [ '.c', '.cc', '.cpp', '.cxx', '.c++' ].include? extension
+        else
+            match = false
+            self.source_filters.each do |filter|
+                puts "Reviewing: #{name} => #{filter} -> #{name} :: #{name.match? Regexp.new(filter)}".cyan if verbose
+                match ||= name.match? Regexp.new(filter)
+            end
+            return true unless match
+        end
+
+        false
+    end
+
+    def build_commands commands, name
+        if commands.length > 0
+            commands.each do |command|
+                puts "#{name.blue} #{command.white.bold}"
+                puts %x{ #{command} }
+                if !$?.exited? && ($?.exitstatus != 0)
+                    puts "#{'ERROR'.red}: #{name} command #{command.white.bold} failed"
+                    exit -1
+                end
+            end
+        end
+        puts ""
+    end
+
 end
 
 
@@ -165,20 +262,15 @@ end
 flags = Flags.new(ARGV)
 
 if flags.tasks_flag || flags.default_flag
-    tasks
+    flags.print_tasks
 end
 
-if !File.exists? flags.properties_file
-    puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in current directory; make sure you are in the correct project directory"
-    exit -1
-end
-
-properties = BuildProperties.new(JSON.parse(File.read(flags.properties_file)))
+builder = Builder.new(flags)
 
 if flags.clean_flag
-    clean properties
+    builder.clean
 end
 
 if flags.build_flag
-    build properties, flags.verbose_flag
+    builder.build
 end
