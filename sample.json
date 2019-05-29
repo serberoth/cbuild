@@ -1,25 +1,58 @@
 {
-    // 'target' is the name of the output executable
+    // 'target' is the name of the output executable or library
+    // (*required*)
     "target": "sample",
-    // 'output' is the build target output directory
+    // 'sources' is an array containing a set of folders with source for the project to be compiled.  Sources
+    // are compiled from each provided source directory in the provided order and recusring all child
+    // directories for any additional source files.  Each source file is compiled into a binary object file
+    // that is then linked to form the target.
+    // (*required*)
+    "sources": [ "src" ],
+    // 'output' is the build target output directory the final binary output is placed in the '<output>/exec'
+    // directory, while temporary object files are placed in the '<output>/objs' folder.
+    // (optional default: ./build)
     "output": "./build",
     // 'cc' defines which compiler to invoke during the compilation process
+    // (optional default: cc)
     "cc": "clang",
     // 'ld' defines which linker to invoke during the linking stage
+    // (optional default: ld)
     "ld": "lld",
     // 'language' defines which language standard to use during compilation
+    // (optional default: c17)
     "language": "c17",
-    // 'sources' is an array containing a set of folders with source for the project to be compiled
-    "sources": [ "src" ],
     // 'filters' is an array of regular expressions to filter source files in the specified folders
     // The regular expression filters define which files are accepted into the compilation phase
+    // (optional default: extension based filter for c/c++ file types)
     "filters": [ ".*\\.c" ],
-    // 'compiler.options' is an array of options passed directly to the compiler during the compilation phase
-    "compiler.options": [
-        "-g", "-Wall", "-O3"
-    ],
-    // 'linker.options' is an array of options passed directly to the linker during the linking stage
-    "linker.options": [
-        "-lm64"
-    ]
+    // 'compiler.options' is an either an object or an array (see 'linker.options') array of options passed
+    // directly to the compiler during the compilation phase.  The values in the 'compiler.options' object
+    // are key value pairs representing the available build modes.  The special key 'global' represents
+    // parameters that are passed to the compiler regardless of the selected build mode.  The default build
+    // mode 'release' is used when no mode is explicitly specified by command line parameter.  Other build
+    // modes contain parameters that are passed to the compiler when the specific build mode is requested.
+    // (optional default: none)
+    "compiler.options": {
+        "global": [ "-Wall" ],
+        "debug": [ "-g", "-O0" ],
+        "release": [ "-O3" ]
+    },
+    // 'linker.options' is an either an object (see 'compiler.options') or an array of options which are
+    // passed directly to the linker during the linking stage.  The values in 'linker.options' represent
+    // the special 'global' build mode which will supply parameters regardless of the invoked build mode.
+    // (optional default: none)
+    "linker.options": [ "-lm64" ],
+    // 'linker.<mode>.options' is an array of options (used only when 'linker.options is an array) passed
+    // directly to the linker during the linking stage when the specified build mode is invoked.  The
+    // default mode 'release' is used when none is specified by command line parameter.
+    // (optional default: none)
+    "linker.<mode>.options": [ "-g" ],
+    // 'prebuild' is an array of commands that are executed prior to the assemble phase of the build process
+    // if any command fails the entire build process fails.
+    // (optional default: none)
+    "prebuild": [ "ls -al" ],
+    // 'postbuild' is an array of commands that are executed following the assemble phase of the build process
+    // if any command fails the build is considered to have failed.
+    // (optional default: none)
+    "postbuild": [ "ls -al ./build/exec/" ]
 }
