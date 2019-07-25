@@ -13,7 +13,7 @@ Available tasks:
 * -f=<filename> - Use <filename> for the build project properties
 * -verbose - Enable verbose output
 
-The default project configuration filename is 'config.json' when not specified.
+The default project configuration filename is 'build.json' when not specified.
 The default target compilation mode is 'release' when not specified.
 
 cbuild requires ruby 2.6+ with the 'fileutils', 'find', and 'json' standard library packages.
