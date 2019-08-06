@@ -64,6 +64,8 @@ class Flags
                 self.properties_file = $1
             when '-verbose'
                 self.verbose_flag = true
+            when '-v'
+                self.verbose_flag = true
             else
                 puts "#{'ERROR'.red}: Invalid parameter option #{item.white.bold}"
                 self.tasks_flag = true
@@ -196,7 +198,7 @@ private
                 object = "#{self.output}/objs/#{basename}.o"
                 options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
                 puts "#{'Compiling'.blue}: #{path.white.bold} -> #{object.white.bold}"
-                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} #{options} #{include_dirs}"
+                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} #{options} -D#{self.mode.upcase} #{include_dirs}"
                 puts command.cyan if verbose
                 puts %x{ #{command} }
                 source_list.append path
