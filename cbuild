@@ -253,7 +253,9 @@ private
 
                 results.append assemble_run_test(path, include_dirs, object_list, verbose)
             end
+            puts ''
             puts "Executed #{results.length} tests #{results.count(false)} failures"
+            puts "#{'FAILED'.red} - Test suites failed; see output for details" unless results.count(false) == 0
             return results.count(false) == 0
         end
     end
