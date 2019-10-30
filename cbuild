@@ -30,6 +30,7 @@ end
 
 class Flags
     attr_accessor :build_flag
+    attr_accessor :test_flag
     attr_accessor :clean_flag
     attr_accessor :tasks_flag
     attr_accessor :default_flag
@@ -39,6 +40,7 @@ class Flags
 
     def initialize(arguments)
         self.build_flag = false
+        self.test_flag = false
         self.clean_flag = false
         self.tasks_flag = false
         self.default_flag = true
@@ -57,6 +59,9 @@ class Flags
             when /build:(.*)/
                 self.build_flag = true
                 self.build_mode = $1
+                self.default_flag = false
+            when 'test'
+                self.test_flag = true
                 self.default_flag = false
             when 'tasks'
                 self.tasks_flag = true
@@ -78,6 +83,7 @@ class Flags
         puts 'clean - Clean the build directory'
         puts 'build - Build the target executable'
         puts 'build:<mode> - Build the specified target mode'
+        puts 'test - Execute the project unit test suites'
         puts 'tasks - Print the build tasks list'
         puts '-f=<filename> - Use <filename> for the build project properties'
         puts '-verbose - Enable verbose output'
@@ -89,6 +95,7 @@ end
 class Builder
     attr_accessor :target, :output, :mode
     attr_accessor :source_dirs, :source_filters
+    attr_accessor :test_dir
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
     attr_accessor :linker, :linker_options, :linker_mode_options
     attr_accessor :language
@@ -113,7 +120,9 @@ class Builder
         self.target = @properties['target'] || 'output'
         self.output = @properties['output'] || './build'
         self.mode = flags.build_mode
-        if self.mode == 'global'
+        if flags.test_flag
+            self.mode = 'debug'
+        elsif self.mode == 'global'
             self.mode = 'release'
         end
 
@@ -123,6 +132,8 @@ class Builder
 
         self.source_dirs = @properties['sources'] || [ './' ]
         self.source_filters = @properties['filters'] || []
+
+        self.test_dir = @properties['tests'] || './test'
         
         self.compiler_options = []
         self.compiler_mode_options = []
@@ -158,6 +169,13 @@ class Builder
         puts "#{'SUCCESS'.green} - Project build directory cleaned"
     end
 
+    def test
+        puts 'Building and executing test suite'
+        result = assemble_run_tests
+
+        puts "#{'SUCCESS'.green} - Unit tests completed successfully" if result
+    end
+
     def build
         exec_prebuild
         result = assemble
@@ -175,13 +193,8 @@ private
         build_commands self.postbuild, 'Postbuild'
     end
 
-    def assemble
-        puts "Assembling #{self.mode.white.bold} target"
-        verbose = @flags.verbose_flag
+    def assemble_objects verbose
         FileUtils.mkdir_p "#{self.output}/objs"
-        FileUtils.mkdir_p "#{self.output}/exec"
-
-        File.delete "#{self.output}/exec/#{self.target}" if File.exists? "#{self.output}/exec/#{self.target}"
 
         include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
         puts "Include Directories: #{include_dirs}".cyan if verbose
@@ -205,16 +218,102 @@ private
                 object_list.append object if $?.exited? && ($?.exitstatus == 0)
             end
         end
+        return source_list, object_list
+    end
+
+    def assemble_run_tests
+        puts "Assembling tests"
+        verbose = @flags.verbose_flag
+        FileUtils.mkdir_p "#{self.output}/tests/objs"
+        FileUtils.mkdir_p "#{self.output}/tests/exec"
+
+        source_list, object_list = assemble_objects(verbose)
+
+        unless (object_list.length > 0) && (object_list.length == source_list.length)
+            puts "#{'FAILED'.red} - See compilation output for details"
+            return false
+        end
+
+        if (object_list.length > 0) && (object_list.length == source_list.length)
+            # Remove the object with the application main from the available objects in the test suite
+            # This does make any sumbols contained within that untestable
+            object_list.delete_if {|obj|
+                dump = %x{ objdump -t #{obj} | grep _main$ }
+                puts "Main Object: #{obj.white.bold} => #{dump}" if verbose && (dump != '')
+                dump != ''
+            }
+
+            include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
+            include_dirs += " -I#{self.test_dir}"
+            puts "Include Directories: #{include_dirs}".cyan if verbose
+
+            results = []
+            Find.find(self.test_dir) do |path|
+                next if filter? path
+
+                results.append assemble_run_test(path, include_dirs, object_list, verbose)
+            end
+            puts "Executed #{results.length} tests #{results.count(false)} failures"
+            return results.count(false) == 0
+        end
+    end
+
+    def assemble_run_test test, include_dirs, object_list, verbose
+        puts "Assembling test #{test.white.bold}"
+
+        extension = File.extname(test)
+        basename = File.basename(test, extension)
+
+        object = "#{self.output}/tests/objs/#{basename}.o"
+        target = "#{self.output}/tests/exec/#{basename}"
+
+        File.delete target if File.exists? target
+
+        options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
+        puts "#{'Compiling'.blue}: #{test.white.bold} -> #{object.white.bold}"
+        command = "#{self.compiler} -c -o #{object} #{test} -std=#{self.language} #{options} -D#{self.mode.upcase} #{include_dirs}"
+        puts command.cyan if verbose
+        puts %x{ #{command} }
+        
+        if $?.exited? && ($?.exitstatus == 0)
+            puts "#{'Linking Target'.yellow}: #{target.white.bold}"
+            options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
+            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{object} #{options}"
+            puts command.cyan if verbose
+            puts %x{ #{command} }
+        end
+        puts "#{'FAILED'.red} - Test #{test} failed to compile; see compilation output for details" unless File.exists? target
+
+        if File.exists? target
+            puts "Executing test suite #{target.white.bold} for #{test.yellow}" if verbose
+            puts %x{ #{target} }
+            result = $?.exited? && ($?.exitstatus == 0)
+            puts "#{((result) ? 'PASS'.green : 'FAIL'.red)} :: #{test}"
+            return result
+        end
+        false
+    end
+
+    def assemble
+        puts "Assembling #{self.mode.white.bold} target"
+        verbose = @flags.verbose_flag
+        FileUtils.mkdir_p "#{self.output}/exec"
+
+        target = "#{self.output}/exec/#{self.target}"
+
+        File.delete target if File.exists? target
+
+        source_list, object_list = assemble_objects(verbose)
 
         if (object_list.length > 0) && (object_list.length == source_list.length)
             puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
             options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
-            command = "#{self.linker} -o #{self.output}/exec/#{self.target} #{object_list.join(' ')} #{options}"
+            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options}"
             puts command.cyan if verbose
             puts %x{ #{command} }
         end
 
-        puts "#{'FAILED'.red} - See compilation output for details" unless File.exists? "#{self.output}/exec/#{self.target}"
+        puts "#{'FAILED'.red} - See compilation output for details" unless File.exists? target
         true
     end
 
@@ -271,6 +370,10 @@ builder = Builder.new(flags)
 
 if flags.clean_flag
     builder.clean
+end
+
+if flags.test_flag
+    builder.test
 end
 
 if flags.build_flag
