@@ -247,21 +247,27 @@ private
             include_dirs += " -I#{self.test_dir}"
             puts "Include Directories: #{include_dirs}".cyan if verbose
 
-            results = []
+            commands = []
+            count = 0
             Find.find(self.test_dir) do |path|
                 next if filter? path
 
-                results.append assemble_run_test(path, include_dirs, object_list, verbose)
+                count += 1
+                cmd = assemble_test(path, include_dirs, object_list, verbose)
+                commands.append([path, cmd]) unless cmd.nil?
             end
+
+            results = []
+            commands.each{|path, cmd| results.append(run_test path, cmd, verbose) }
             puts ''
-            puts "Executed #{results.length} tests #{results.count(false)} failures"
+            puts "Executed #{count} suites #{count - commands.count} errors #{results.count(false)} failures".white.bold
             puts "#{'FAILED'.red} - Test suites failed; see output for details" unless results.count(false) == 0
             return results.count(false) == 0
         end
     end
 
-    def assemble_run_test test, include_dirs, object_list, verbose
-        puts "Assembling test #{test.white.bold}"
+    def assemble_test test, include_dirs, object_list, verbose
+        puts "#{'Assembling Test'.cyan}: #{test.white.bold}"
 
         extension = File.extname(test)
         basename = File.basename(test, extension)
@@ -286,6 +292,13 @@ private
         end
         puts "#{'FAILED'.red} - Test #{test} failed to compile; see compilation output for details" unless File.exists? target
 
+        if File.exists? target
+            return target
+        end
+        nil
+    end
+
+    def run_test test, target, verbose
         if File.exists? target
             puts "Executing test suite #{target.white.bold} for #{test.yellow}" if verbose
             puts %x{ #{target} }
