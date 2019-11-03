@@ -261,8 +261,9 @@ private
             commands.each{|path, cmd| results.append(run_test path, cmd, verbose) }
             puts ''
             puts "Executed #{count} suites #{count - commands.count} errors #{results.count(false)} failures".white.bold
-            puts "#{'FAILED'.red} - Test suites failed; see output for details" unless results.count(false) == 0
-            return results.count(false) == 0
+            result = results.count(false) == 0 && (count - commands.count) == 0
+            puts "#{'FAILED'.red} - Test suites failed; see output for details" unless result
+            return result
         end
     end
 
