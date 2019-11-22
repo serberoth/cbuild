@@ -37,6 +37,7 @@ class Flags
     attr_accessor :verbose_flag
     attr_accessor :properties_file
     attr_accessor :build_mode
+    attr_accessor :test_list
 
     def initialize(arguments)
         self.build_flag = false
@@ -47,6 +48,7 @@ class Flags
         self.verbose_flag = false
         self.properties_file = 'build.json'
         self.build_mode = 'release'
+        self.test_list = []
 
         arguments.each do |item|
             case item
@@ -63,6 +65,10 @@ class Flags
             when 'test'
                 self.test_flag = true
                 self.default_flag = false
+            when /test\[([^\]]*)\]/
+                self.test_flag = true
+                self.default_flag = false
+                self.test_list = $1.split(',').each{|s| s.strip!}.keep_if{|s| !s.nil? && !s.empty? }
             when 'tasks'
                 self.tasks_flag = true
             when /-f=(.*)/
@@ -84,6 +90,7 @@ class Flags
         puts 'build - Build the target executable'
         puts 'build:<mode> - Build the specified target mode'
         puts 'test - Execute the project unit test suites'
+        puts 'test[<test>(,<test>...)] - Execute the project unit test suites for the specified suites'
         puts 'tasks - Print the build tasks list'
         puts '-f=<filename> - Use <filename> for the build project properties'
         puts '-verbose - Enable verbose output'
@@ -95,7 +102,7 @@ end
 class Builder
     attr_accessor :target, :output, :mode
     attr_accessor :source_dirs, :source_filters
-    attr_accessor :test_dir
+    attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
     attr_accessor :linker, :linker_options, :linker_mode_options
     attr_accessor :language
@@ -134,6 +141,7 @@ class Builder
         self.source_filters = @properties['filters'] || []
 
         self.test_dir = @properties['tests'] || './test'
+        self.test_list = flags.test_list || []
         
         self.compiler_options = []
         self.compiler_mode_options = []
@@ -251,6 +259,9 @@ private
             count = 0
             Find.find(self.test_dir) do |path|
                 next if filter? path
+                # skip tests that are not specified in the list
+                puts "#{self.test_dir} #{path} :: !#{test_list}.include?(#{path[(self.test_dir.length+1)...-2]}) == #{!self.test_list.include?(path[self.test_dir.length, -2])}" if verbose && !self.test_list.empty?
+                next if !self.test_list.empty? && !self.test_list.include?(path[(self.test_dir.length+1)...-2])
 
                 count += 1
                 cmd = assemble_test(path, include_dirs, object_list, verbose)
