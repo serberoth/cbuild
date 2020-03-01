@@ -312,7 +312,7 @@ private
 
     def run_test test, target, verbose
         if File.exists? target
-            puts "Executing test suite #{target.white.bold} for #{test.yellow}" if verbose
+            puts "Executing test suite #{target.white.bold} for #{test.yellow}" # if verbose
             puts %x{ #{target} }
             result = $?.exited? && ($?.exitstatus == 0)
             puts "#{((result) ? 'PASS'.green : 'FAIL'.red)} :: #{target.white.bold} -> #{test.white.bold}"
