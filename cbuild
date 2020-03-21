@@ -37,6 +37,7 @@ class Flags
     attr_accessor :verbose_flag
     attr_accessor :properties_file
     attr_accessor :build_mode
+    attr_accessor :analyzer_mode
     attr_accessor :test_list
 
     def initialize(arguments)
@@ -48,6 +49,7 @@ class Flags
         self.verbose_flag = false
         self.properties_file = 'build.json'
         self.build_mode = 'release'
+        self.analyzer_mode = 'debug'
         self.test_list = []
 
         arguments.each do |item|
@@ -62,6 +64,19 @@ class Flags
                 self.build_flag = true
                 self.build_mode = $1
                 self.default_flag = false
+            when 'analyze'
+                self.build_flag = true
+                self.build_mode = item
+                self.default_flag = false
+            when /analyze:(.*)/
+                self.build_flag = true
+                self.build_mode = item
+                self.analyzer_mode = $1
+                self.default_flag = false
+            # when 'profile'
+            #     self.build_flag = true
+            #     self.build_mode = item
+            #     self.default_flag = false
             when 'test'
                 self.test_flag = true
                 self.default_flag = false
@@ -89,6 +104,9 @@ class Flags
         puts 'clean - Clean the build directory'
         puts 'build - Build the target executable'
         puts 'build:<mode> - Build the specified target mode'
+        puts 'analyze - Build the target with static analysis'
+        puts 'analyze:<mode> - Build the specified target mode with static analysis'
+        # puts 'profile - Build the target with profiling enabled'
         puts 'test - Execute the project unit test suites'
         puts 'test[<test>(,<test>...)] - Execute the project unit test suites for the specified suites'
         puts 'tasks - Print the build tasks list'
@@ -105,6 +123,7 @@ class Builder
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
     attr_accessor :linker, :linker_options, :linker_mode_options
+    attr_accessor :analyzer, :profiler
     attr_accessor :language
     attr_accessor :prebuild, :postbuild
 
@@ -135,6 +154,8 @@ class Builder
 
         self.compiler = @properties['cc'] || 'cc'
         self.linker = @properties['ld'] || 'ld'
+        self.analyzer = @properties['analyzer'] || ''
+        self.profiler = @properties['profiles'] || ''
         self.language = @properties['language'] || 'c17'
 
         self.source_dirs = @properties['sources'] || [ './' ]
@@ -145,26 +166,30 @@ class Builder
         
         self.compiler_options = []
         self.compiler_mode_options = []
-        if !@properties['compiler.options'].nil?
-            if @properties['compiler.options'].class == Array
-                self.compiler_options = @properties['compiler.options'] || []
-                self.compiler_mode_options = @properties["compiler.#{mode}.options"] || []
-            elsif @properties['compiler.options'].class == Hash
-                self.compiler_options = @properties['compiler.options']['global'] || []
-                self.compiler_mode_options = @properties['compiler.options'][mode] || []
-            end
+        opts, mode_opts = get_options('compiler', mode)
+        self.compiler_options.concat(opts)
+        self.compiler_mode_options.concat(mode_opts)
+        if self.mode == 'analyze'
+            opts, mode_opts = get_options('compiler', flags.analyzer_mode)
+            self.compiler_options.concat(opts)
+            self.compiler_mode_options.concat(mode_opts)
         end
-        
+            
         self.linker_options = []
         self.linker_mode_options = []
-        if !@properties['linker.options'].nil?
-            if @properties['linker.options'].class == Array
-                self.linker_options = @properties['linker.options'] || []
-                self.linker_mode_options = @properties["linker.#{mode}.options"] || []
-            elsif @properties['linker.options'].class == Hash
-                self.linker_options = @properties['linker.options']['global'] || []
-                self.linker_mode_options = @properties['linker.options'][mode] || []
-            end
+        opts, mode_opts = get_options('linker', mode)
+        self.linker_options.concat(opts)
+        self.linker_mode_options.concat(mode_opts)
+        if self.mode == 'analyze'
+            opts, mode_opts = get_options('linker', flags.analyzer_mode)
+            self.linker_options.concat(opts)
+            self.linker_mode_options.concat(mode_opts)
+        end
+
+        if self.mode == 'analyze'
+            self.compiler = "#{self.analyzer} #{self.compiler}"
+            self.linker = "#{self.analyzer} #{self.compiler}"
+            self.mode = flags.analyzer_mode
         end
 
         self.prebuild = @properties['prebuild'] || []
@@ -193,6 +218,21 @@ class Builder
     end
 
 private
+    def get_options type, mode
+        if !@properties["#{type}.options"].nil?
+            if @properties["#{type}.options"].class == Array
+                options = @properties["#{type}.options"] || []
+                mode_options = @properties["#{type}.#{mode}.options"] || []
+                return options, mode_options
+            elsif @properties["#{type}.options"].class == Hash
+                options = @properties["#{type}.options"]['global'] || []
+                mode_options = @properties["#{type}.options"][mode] || []
+                return options, mode_options
+            end
+        end
+        return [], []
+    end
+
     def exec_prebuild
         build_commands self.prebuild, 'Prebuild'
     end
