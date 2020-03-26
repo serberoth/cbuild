@@ -30,6 +30,8 @@ end
 
 class Flags
     attr_accessor :build_flag
+    attr_accessor :analyze_flag
+    # attr_accessor :profile_flag
     attr_accessor :test_flag
     attr_accessor :clean_flag
     attr_accessor :tasks_flag
@@ -42,6 +44,8 @@ class Flags
 
     def initialize(arguments)
         self.build_flag = false
+        self.analyze_flag = false
+        # self.profile_flag = false
         self.test_flag = false
         self.clean_flag = false
         self.tasks_flag = false
@@ -49,7 +53,6 @@ class Flags
         self.verbose_flag = false
         self.properties_file = 'build.json'
         self.build_mode = 'release'
-        self.analyzer_mode = 'debug'
         self.test_list = []
 
         arguments.each do |item|
@@ -65,17 +68,14 @@ class Flags
                 self.build_mode = $1
                 self.default_flag = false
             when 'analyze'
-                self.build_flag = true
-                self.build_mode = item
+                self.analyze_flag = true
                 self.default_flag = false
             when /analyze:(.*)/
-                self.build_flag = true
-                self.build_mode = item
-                self.analyzer_mode = $1
+                self.analzye_flag = true
+                self.build_mode = $1
                 self.default_flag = false
             # when 'profile'
-            #     self.build_flag = true
-            #     self.build_mode = item
+            #     self.profile_flag = true
             #     self.default_flag = false
             when 'test'
                 self.test_flag = true
@@ -86,9 +86,11 @@ class Flags
                 self.test_list = $1.split(',').each{|s| s.strip!}.keep_if{|s| !s.nil? && !s.empty? }
             when 'tasks'
                 self.tasks_flag = true
+            when /--filename=(.*)/
+                self.properties_file = $1
             when /-f=(.*)/
                 self.properties_file = $1
-            when '-verbose'
+            when '--verbose'
                 self.verbose_flag = true
             when '-v'
                 self.verbose_flag = true
@@ -110,8 +112,8 @@ class Flags
         puts 'test - Execute the project unit test suites'
         puts 'test[<test>(,<test>...)] - Execute the project unit test suites for the specified suites'
         puts 'tasks - Print the build tasks list'
-        puts '-f=<filename> - Use <filename> for the build project properties'
-        puts '-verbose - Enable verbose output'
+        puts '--filename=<filename> or -f=<filename> - Use <filename> for the build project properties'
+        puts '--verbose or -v - Enable verbose output'
         exit! 0
     end
         
@@ -123,7 +125,8 @@ class Builder
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
     attr_accessor :linker, :linker_options, :linker_mode_options
-    attr_accessor :analyzer, :profiler
+    attr_accessor :analyzer, :analyzer_options, :analyzer_mode_options
+    # attr_accessor :profiler, :profiler_options, :profiler_mode_options
     attr_accessor :language
     attr_accessor :prebuild, :postbuild
 
@@ -155,7 +158,7 @@ class Builder
         self.compiler = @properties['cc'] || 'cc'
         self.linker = @properties['ld'] || 'ld'
         self.analyzer = @properties['analyzer'] || ''
-        self.profiler = @properties['profiles'] || ''
+        # self.profiler = @properties['profiler'] || ''
         self.language = @properties['language'] || 'c17'
 
         self.source_dirs = @properties['sources'] || [ './' ]
@@ -164,33 +167,10 @@ class Builder
         self.test_dir = @properties['tests'] || './test'
         self.test_list = flags.test_list || []
         
-        self.compiler_options = []
-        self.compiler_mode_options = []
-        opts, mode_opts = get_options('compiler', mode)
-        self.compiler_options.concat(opts)
-        self.compiler_mode_options.concat(mode_opts)
-        if self.mode == 'analyze'
-            opts, mode_opts = get_options('compiler', flags.analyzer_mode)
-            self.compiler_options.concat(opts)
-            self.compiler_mode_options.concat(mode_opts)
-        end
-            
-        self.linker_options = []
-        self.linker_mode_options = []
-        opts, mode_opts = get_options('linker', mode)
-        self.linker_options.concat(opts)
-        self.linker_mode_options.concat(mode_opts)
-        if self.mode == 'analyze'
-            opts, mode_opts = get_options('linker', flags.analyzer_mode)
-            self.linker_options.concat(opts)
-            self.linker_mode_options.concat(mode_opts)
-        end
-
-        if self.mode == 'analyze'
-            self.compiler = "#{self.analyzer} #{self.compiler}"
-            self.linker = "#{self.analyzer} #{self.compiler}"
-            self.mode = flags.analyzer_mode
-        end
+        self.compiler_options, self.compiler_mode_options = get_options('compiler', mode)
+        self.linker_options, self.linker_mode_options = get_options('linker', mode)
+        self.analyzer_options, self.analyzer_mode_options = get_options('analyzer', flags.analyzer_mode)
+        # self.profiler_options, self.profiler_mode_options = get_options('profiler', flags.profiler_mode)
 
         self.prebuild = @properties['prebuild'] || []
         self.postbuild = @properties['postbuild'] || []
@@ -206,6 +186,7 @@ class Builder
         puts 'Building and executing test suite'
         result = assemble_run_tests
 
+        puts "#{'FAILED'.red} - Test suites failed; see output for details" unless result
         puts "#{'SUCCESS'.green} - Unit tests completed successfully" if result
     end
 
@@ -214,7 +195,17 @@ class Builder
         result = assemble
         exec_postbuild
 
-        puts "#{'SUCCESS'.green} - Build completed successfully" if File.exists? "#{self.output}/exec/#{self.target}" if result
+        puts "#{'FAILED'.red} - See compilation output for details" unless result
+        puts "#{'SUCCESS'.green} - Build completed successfully" if result
+    end
+
+    def analyze
+        exec_prebuild
+        result = assemble_static_analysis
+        exec_postbuild
+
+        puts "#{'FAILED'.red} - See analysis output for details" unless result
+        puts "#{'SUCCESS'.green} - Analysis completed successfully" if result
     end
 
 private
@@ -241,6 +232,29 @@ private
         build_commands self.postbuild, 'Postbuild'
     end
 
+    def build_source_list verbose
+        FileUtils.mkdir_p "#{self.output}/objs"
+
+        include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
+        puts "Include Directories: #{include_dirs}".cyan if verbose
+
+        source_list = []
+        object_list = []
+        self.source_dirs.each do |dir|
+            Find.find(dir) do |path|
+                next if filter? path
+
+                extension = File.extname(path)
+                basename = File.basename(path, extension)
+
+                object = "#{self.output}/objs/#{basename}.o"
+                source_list.append path
+                object_list.append object
+            end
+        end
+        return source_list, object_list
+    end
+
     def assemble_objects verbose
         FileUtils.mkdir_p "#{self.output}/objs"
 
@@ -259,7 +273,7 @@ private
                 object = "#{self.output}/objs/#{basename}.o"
                 options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
                 puts "#{'Compiling'.blue}: #{path.white.bold} -> #{object.white.bold}"
-                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} #{options} -D#{self.mode.upcase} #{include_dirs}"
+                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} -D#{self.mode.upcase} #{options} #{include_dirs}"
                 puts command.cyan if verbose
                 puts %x{ #{command} }
                 source_list.append path
@@ -312,9 +326,7 @@ private
             commands.each{|path, cmd| results.append(run_test path, cmd, verbose) }
             puts ''
             puts "Executed #{count} suites #{count - commands.count} errors #{results.count(false)} failures".white.bold
-            result = results.count(false) == 0 && (count - commands.count) == 0
-            puts "#{'FAILED'.red} - Test suites failed; see output for details" unless result
-            return result
+            return results.count(false) == 0 && (count - commands.count) == 0
         end
     end
 
@@ -331,7 +343,7 @@ private
 
         options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
         puts "#{'Compiling'.blue}: #{test.white.bold} -> #{object.white.bold}"
-        command = "#{self.compiler} -c -o #{object} #{test} -std=#{self.language} #{options} -D#{self.mode.upcase} #{include_dirs}"
+        command = "#{self.compiler} -c -o #{object} #{test} -std=#{self.language} -D#{self.mode.upcase} #{options} #{include_dirs}"
         puts command.cyan if verbose
         puts %x{ #{command} }
         
@@ -375,13 +387,43 @@ private
         if (object_list.length > 0) && (object_list.length == source_list.length)
             puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
             options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
-            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options}"
+            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options} #{include_dirs}"
             puts command.cyan if verbose
             puts %x{ #{command} }
         end
 
-        puts "#{'FAILED'.red} - See compilation output for details" unless File.exists? target
-        true
+        return File.exists? target
+    end
+
+    def assemble_static_analysis
+        puts "Assembling #{self.mode.white.bold} target"
+        verbose = @flags.verbose_flag
+        FileUtils.mkdir_p "#{self.output}/exec"
+
+        target = "#{self.output}/exec/#{self.target}"
+
+        File.delete target if File.exists? target
+
+        source_list, object_list = build_source_list(verbose)
+
+        include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
+        puts "Include Directories: #{include_dirs}".cyan if verbose
+
+        if (object_list.length > 0) && (object_list.length == source_list.length)
+            puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
+            options = [
+                "-std=#{self.language} -D#{self.mode.upcase}", include_dirs,
+                self.analyzer_options.join(' '), self.analyzer_mode_options.join(' '),
+                self.compiler_options.join(' '), self.compiler_mode_options.join(' '),
+                self.linker_options.join(' '), self.linker_mode_options.join(' '),
+            ].join(' ')
+            command = "#{self.analyzer} #{options} #{source_list.join(' ')}"
+            puts command.cyan if verbose
+            puts %x{ #{command} }
+            return $?.exited? && ($?.exitstatus == 0)
+        end
+
+        return false
     end
 
     def filter? name
@@ -446,3 +488,11 @@ end
 if flags.build_flag
     builder.build
 end
+
+if flags.analyze_flag
+    builder.analyze
+end
+
+# if flags.profile_flag
+#     builder.profile
+# end
