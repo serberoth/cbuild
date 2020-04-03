@@ -71,7 +71,7 @@ class Flags
                 self.analyze_flag = true
                 self.default_flag = false
             when /analyze:(.*)/
-                self.analzye_flag = true
+                self.analyze_flag = true
                 self.build_mode = $1
                 self.default_flag = false
             # when 'profile'
@@ -383,6 +383,9 @@ private
         File.delete target if File.exists? target
 
         source_list, object_list = assemble_objects(verbose)
+
+        include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
+        puts "Include Directories: #{include_dirs}".cyan if verbose
 
         if (object_list.length > 0) && (object_list.length == source_list.length)
             puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
