@@ -310,6 +310,7 @@ private
             puts "Include Directories: #{include_dirs}".cyan if verbose
 
             commands = []
+            failures = []
             count = 0
             Find.find(self.test_dir) do |path|
                 next if filter? path
@@ -320,11 +321,18 @@ private
                 count += 1
                 cmd = assemble_test(path, include_dirs, object_list, verbose)
                 commands.append([path, cmd]) unless cmd.nil?
+                failures.append(path) if cmd.nil?
             end
 
             results = []
-            commands.each{|path, cmd| results.append(run_test path, cmd, verbose) }
+            commands.each{|path, cmd|
+                result = run_test(path, cmd, verbose)
+                failures.append(path) if !result
+                results.append(result)
+            }
             puts ''
+            failures.each{|path| puts "\t#{"FAILURE".red} - #{path.white.bold}" } if failures.length > 0
+            puts '' if failures.length > 0
             puts "Executed #{count} suites #{count - commands.count} errors #{results.count(false)} failures".white.bold
             return results.count(false) == 0 && (count - commands.count) == 0
         end
