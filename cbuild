@@ -332,9 +332,10 @@ private
             }
             puts ''
             failures.each{|path| puts "\t#{"FAILURE".red} - #{path.white.bold}" } if failures.length > 0
-            puts '' if failures.length > 0
+            puts "\t#{"FAILURE".red} - #{"No test suites executed".white.bold}" if count == 0
+            puts '' if (failures.length > 0) || (count == 0)
             puts "Executed #{count} suites #{count - commands.count} errors #{results.count(false)} failures".white.bold
-            return results.count(false) == 0 && (count - commands.count) == 0
+            return count > 0 && results.count(false) == 0 && (count - commands.count) == 0
         end
     end
 
