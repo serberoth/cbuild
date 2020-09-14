@@ -214,10 +214,12 @@ private
             if @properties["#{type}.options"].class == Array
                 options = @properties["#{type}.options"] || []
                 mode_options = @properties["#{type}.#{mode}.options"] || []
+                (mode_options = (mode_options + (@properties["#{type}.test.options"] || [])).uniq) if @flags.test_flag
                 return options, mode_options
             elsif @properties["#{type}.options"].class == Hash
                 options = @properties["#{type}.options"]['global'] || []
                 mode_options = @properties["#{type}.options"][mode] || []
+                (mode_options = (mode_options + (@properties["#{type}.options"]['test'] || [])).uniq) if @flags.test_flag
                 return options, mode_options
             end
         end
