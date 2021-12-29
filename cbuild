@@ -3,6 +3,8 @@
 require 'fileutils'
 require 'find'
 require 'json'
+require 'rbconfig'
+require 'yaml'
 
 class String
     %w{black red green yellow blue magenta cyan white}.each_with_index do |colour, index|
@@ -25,6 +27,30 @@ class String
     def underline;      "\e[4m#{self}\e[24m" end
     def blink;          "\e[5m#{self}\e[25m" end
     def reverse_colour; "\e[7m#{self}\e[27m" end
+
+end
+
+module OS
+    HOST = RbConfig::CONFIG['host_os']
+
+    def OS.win?
+        !(/cygwin|mswin|mingw|bccwin|wince|emx/ =~ HOST).nil?
+    end
+
+    def OS.osx?
+        !(/darwin/ =~ HOST).nil?
+    end
+
+    def OS.unix?
+        !OS.win? && !OS.osx?
+    end
+
+    def OS.which?
+        return 'win' if OS.win?
+        return 'osx' if OS.osx?
+        return 'unix' if OS.unix?
+        return 'unknown'
+    end
 
 end
 
@@ -54,6 +80,11 @@ class Flags
         self.properties_file = 'build.json'
         self.build_mode = 'release'
         self.test_list = []
+
+        # If a JSON configuration file does not exist then try loading a YAML configuration file
+        if !File.exists? self.properties_file
+            self.properties_file = 'build.yaml'
+        end
 
         arguments.each do |item|
             case item
@@ -127,24 +158,44 @@ class Builder
     attr_accessor :linker, :linker_options, :linker_mode_options
     attr_accessor :analyzer, :analyzer_options, :analyzer_mode_options
     # attr_accessor :profiler, :profiler_options, :profiler_mode_options
-    attr_accessor :language
+    attr_accessor :language, :language_cpp
     attr_accessor :prebuild, :postbuild
 
     def initialize(flags)
-        if !File.exists? flags.properties_file
-            puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in the current directory."
-            puts "Please make sure you are in the correct project directory and are specifying the correct project file."
-            exit -1
-        end
-
-        begin
-            @properties = JSON.parse(File.read(flags.properties_file))
-        rescue JSON::JSONError => e
-            puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
-            puts "#{'ERROR'.red}: #{e.message}"
-            exit -1
+        extension = File.extname(flags.properties_file)
+        puts "#{"Loading Configuration File:}".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
+        if '.yml' == extension || '.yaml' == extension then
+            if !File.exists? flags.properties_file
+                puts "#{'ERROR'.red}: Project YAML #{flags.properties_file.white.bold} does not exists in the current directory."
+                puts "Please make sure you are in the correct project directory and are specifying the correct project file."
+                exit -1
+            end
+    
+            begin
+                @properties = YAML.load(File.read(flags.properties_file))
+            rescue YAML::SyntaxError => e
+                puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{flags.properties_file.white.bold}"
+                puts "#{'ERROR'.red}: #{e.message}"
+                exit -1
+            end
+        else
+            if !File.exists? flags.properties_file
+                puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in the current directory."
+                puts "Please make sure you are in the correct project directory and are specifying the correct project file."
+                exit -1
+            end
+    
+            begin
+                @properties = JSON.parse(File.read(flags.properties_file))
+            rescue JSON::JSONError => e
+                puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
+                puts "#{'ERROR'.red}: #{e.message}"
+                exit -1
+            end
         end
         @flags = flags
+
+        @host = OS.which?
 
         self.target = @properties['target'] || 'output'
         self.output = @properties['output'] || './build'
@@ -159,10 +210,11 @@ class Builder
         self.linker = @properties['ld'] || 'ld'
         self.analyzer = @properties['analyzer'] || ''
         # self.profiler = @properties['profiler'] || ''
-        self.language = @properties['language'] || 'c17'
+        self.language = @properties['language'] || @properties['language.c'] || 'c17'
+        self.language_cpp = @properties['language.cpp'] || 'c++17'
 
         self.source_dirs = @properties['sources'] || [ './' ]
-        self.source_filters = @properties['filters'] || []
+        self.source_filters = get_filters()
 
         self.test_dir = @properties['tests'] || './test'
         self.test_list = flags.test_list || []
@@ -209,16 +261,25 @@ class Builder
     end
 
 private
+    def get_filters
+        filters = @properties['filters'] || []
+        filters += @properties["filters.#{@host}"] || []
+    end
+
     def get_options type, mode
         if !@properties["#{type}.options"].nil?
             if @properties["#{type}.options"].class == Array
                 options = @properties["#{type}.options"] || []
+                options = (options + (@properties["#{type}.#{@host}.options"] || [])).uniq
                 mode_options = @properties["#{type}.#{mode}.options"] || []
+                mode_options = (mode_options + (@properties["#{type}.#{mode}.#{@host}.options"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.test.options"] || [])).uniq) if @flags.test_flag
                 return options, mode_options
             elsif @properties["#{type}.options"].class == Hash
                 options = @properties["#{type}.options"]['global'] || []
+                options = (options + (@properties["#{type}.options"]["global.#{@host}"] || [])).uniq
                 mode_options = @properties["#{type}.options"][mode] || []
+                mode_options = (mode_options + (@properties["#{type}.options"]["#{mode}.#{@host}"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.options"]['test'] || [])).uniq) if @flags.test_flag
                 return options, mode_options
             end
@@ -275,7 +336,8 @@ private
                 object = "#{self.output}/objs/#{basename}.o"
                 options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
                 puts "#{'Compiling'.blue}: #{path.white.bold} -> #{object.white.bold}"
-                command = "#{self.compiler} -c -o #{object} #{path} -std=#{self.language} -D#{self.mode.upcase} #{options} #{include_dirs}"
+                std = if extension == '.cpp' || extension == '.cxx' || extension == '.c++' then self.language_cpp else self.language end
+                command = "#{self.compiler} -c -o #{object} #{path} -std=#{std} -D#{self.mode.upcase} #{options} #{include_dirs}"
                 puts command.cyan if verbose
                 puts %x{ #{command} }
                 source_list.append path
@@ -354,7 +416,8 @@ private
 
         options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
         puts "#{'Compiling'.blue}: #{test.white.bold} -> #{object.white.bold}"
-        command = "#{self.compiler} -c -o #{object} #{test} -std=#{self.language} -D#{self.mode.upcase} #{options} #{include_dirs}"
+        std = if extension == '.cpp' || extension == '.cxx' || extension == '.c++' then self.language_cpp else self.language end
+        command = "#{self.compiler} -c -o #{object} #{test} -std=#{std} -D#{self.mode.upcase} #{options} #{include_dirs}"
         puts command.cyan if verbose
         puts %x{ #{command} }
         
@@ -388,6 +451,8 @@ private
         puts "Assembling #{self.mode.white.bold} target"
         verbose = @flags.verbose_flag
         FileUtils.mkdir_p "#{self.output}/exec"
+
+        puts "Host Operating System :: #{@host.white.bold}" if verbose
 
         target = "#{self.output}/exec/#{self.target}"
 
