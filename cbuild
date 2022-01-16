@@ -245,7 +245,7 @@ class Builder
     def build
         exec_prebuild
         result = assemble
-        exec_postbuild
+        exec_postbuild if result
 
         puts "#{'FAILED'.red} - See compilation output for details" unless result
         puts "#{'SUCCESS'.green} - Build completed successfully" if result
@@ -254,7 +254,7 @@ class Builder
     def analyze
         exec_prebuild
         result = assemble_static_analysis
-        exec_postbuild
+        # exec_postbuild
 
         puts "#{'FAILED'.red} - See analysis output for details" unless result
         puts "#{'SUCCESS'.green} - Analysis completed successfully" if result
