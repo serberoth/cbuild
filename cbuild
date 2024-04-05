@@ -463,15 +463,17 @@ private
         include_dirs = self.source_dirs.map {|dir| "-I#{dir}" }.join ' '
         puts "Include Directories: #{include_dirs}".cyan if verbose
 
-        if (object_list.length > 0) && (object_list.length == source_list.length)
+        if !self.linker.empty? && (object_list.length > 0) && (object_list.length == source_list.length)
             puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
             options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
             command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options} #{include_dirs}"
             puts command.cyan if verbose
             puts %x{ #{command} }
+
+           return File.exists? target
         end
 
-        return File.exists? target
+        return source_list.length == object_list.length
     end
 
     def assemble_static_analysis
