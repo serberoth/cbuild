@@ -82,7 +82,7 @@ class Flags
         self.test_list = []
 
         # If a JSON configuration file does not exist then try loading a YAML configuration file
-        if !File.exists? self.properties_file
+        if !File.exist? self.properties_file
             self.properties_file = 'build.yaml'
         end
 
@@ -165,7 +165,7 @@ class Builder
         extension = File.extname(flags.properties_file)
         puts "#{"Loading Configuration File:}".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
         if '.yml' == extension || '.yaml' == extension then
-            if !File.exists? flags.properties_file
+            if !File.exist? flags.properties_file
                 puts "#{'ERROR'.red}: Project YAML #{flags.properties_file.white.bold} does not exists in the current directory."
                 puts "Please make sure you are in the correct project directory and are specifying the correct project file."
                 exit -1
@@ -179,7 +179,7 @@ class Builder
                 exit -1
             end
         else
-            if !File.exists? flags.properties_file
+            if !File.exist? flags.properties_file
                 puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in the current directory."
                 puts "Please make sure you are in the correct project directory and are specifying the correct project file."
                 exit -1
@@ -230,7 +230,7 @@ class Builder
 
     def clean
         puts 'Cleaning build directory'
-        FileUtils.rm_r self.output if File.exists? self.output
+        FileUtils.rm_r self.output if File.exist? self.output
         puts "#{'SUCCESS'.green} - Project build directory cleaned"
     end
 
@@ -412,7 +412,7 @@ private
         object = "#{self.output}/tests/objs/#{basename}.o"
         target = "#{self.output}/tests/exec/#{basename}"
 
-        File.delete target if File.exists? target
+        File.delete target if File.exist? target
 
         options = [ self.compiler_options.join(' '), self.compiler_mode_options.join(' ') ].join(' ')
         puts "#{'Compiling'.blue}: #{test.white.bold} -> #{object.white.bold}"
@@ -428,16 +428,16 @@ private
             puts command.cyan if verbose
             puts %x{ #{command} }
         end
-        puts "#{'FAILED'.red} - Test #{test} failed to compile; see compilation output for details" unless File.exists? target
+        puts "#{'FAILED'.red} - Test #{test} failed to compile; see compilation output for details" unless File.exist? target
 
-        if File.exists? target
+        if File.exist? target
             return target
         end
         nil
     end
 
     def run_test test, target, verbose
-        if File.exists? target
+        if File.exist? target
             puts "Executing test suite #{target.white.bold} for #{test.yellow}" # if verbose
             puts %x{ #{target} }
             result = $?.exited? && ($?.exitstatus == 0)
@@ -456,7 +456,7 @@ private
 
         target = "#{self.output}/exec/#{self.target}"
 
-        File.delete target if File.exists? target
+        File.delete target if File.exist? target
 
         source_list, object_list = assemble_objects(verbose)
 
@@ -470,7 +470,7 @@ private
             puts command.cyan if verbose
             puts %x{ #{command} }
 
-           return File.exists? target
+           return File.exist? target
         end
 
         return source_list.length == object_list.length
@@ -483,7 +483,7 @@ private
 
         target = "#{self.output}/exec/#{self.target}"
 
-        File.delete target if File.exists? target
+        File.delete target if File.exist? target
 
         source_list, object_list = build_source_list(verbose)
 
