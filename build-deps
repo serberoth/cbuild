@@ -1,0 +1,363 @@
+#!/usr/bin/env ruby
+# -*- mode: ruby; -*-
+# vi: set ft=ruby :
+
+require 'fileutils'
+require 'json'
+
+class String
+  %w{black red green yellow blue magenta cyan white}.each_with_index do |colour, index|
+    define_method "#{colour}" do
+      return "\e[3#{index}m#{self}\e[0m"
+    end
+    define_method "#{colour}_bkg" do
+      return "\e[4#{index}m#{self}\e[0m"
+    end
+  end
+
+  def bold;           "\e[1m#{self}\e[22m" end
+  def italic;         "\e[3m#{self}\e[23m" end
+  def underline;      "\e[4m#{self}\e[24m" end
+  def blink;          "\e[5m#{self}\e[25m" end
+  def reverse_colour; "\e[7m#{self}\e[27m" end
+
+end
+
+
+
+module Command
+
+  def substitute subs, pwd
+    raise 'Function `substitute` not implemented'
+  end
+
+  def execute
+    raise 'Function `execute` not implemented'
+  end
+
+  def cleanup
+    # Most `Command` instances will not need to do anything to cleanup
+  end
+
+private
+  def substitute_for string, subs, pwd
+    subs.each do |key, val|
+      next if key == 'pwd' # ignore pwd if it is added by mistake
+      string = string.gsub(/\$\{#{key}\}/, (val || key))
+    end
+    string = string.gsub(/\$\{pwd\}/, pwd)
+  end
+
+end
+
+
+
+class EnvSetter
+  include Command
+
+  def initialize(name, value)
+    @name = name
+    @original = ENV[@name]
+    @value = value
+  end
+
+  def substitute subs, pwd
+    @value = substitute_for(@value, subs, pwd)
+  end
+
+  def execute
+    ENV[@name] = @value
+    return true
+  end
+
+  def cleanup
+    ENV[@name] = @original
+    return true
+  end
+
+  def to_s
+    "ENV[#{@name}] == #{@value}"
+  end
+
+end
+
+class FileRemover
+  include Command
+
+  def initialize(file)
+    @file = file
+  end
+
+  def substitute subs, pwd
+    @file = substitute_for(@file, subs, pwd)
+  end
+
+  def execute
+    begin
+      FileUtils.rm_rf @file
+      return true
+    rescue Errno::ENOENT
+      return false
+    end
+  end
+
+  def to_s
+    "rm -Rf #{@file}"
+  end
+
+end
+
+class CommandExecutor
+  include Command
+
+  attr_accessor :dir, :subs
+  
+  def initialize(dir, commands, subs = {})
+    @dir = dir
+    @commands = commands
+    @subs = subs
+  end
+
+  def substitute subs, pwd
+    @dir = substitute_for(@dir, subs, pwd)
+    @subs = subs
+  end
+
+  def execute
+    commands = []
+    Dir.chdir(@dir) do
+      @commands.each do |cmd|
+        pwd = Dir.pwd
+        if cmd.is_a? String
+          cmd = substitute_for(cmd, @subs, pwd)
+          puts "Executing: #{cmd.yellow}"
+          puts %x{ #{cmd} }
+          result = $?.exited? && ($?.exitstatus == 0)
+          if !result then
+            puts "#{'FAILED'.red} :: #{cmd.yellow}"
+            return false
+          end
+        elsif cmd.is_a? Command
+          commands << cmd
+          cmd.substitute(@subs, pwd)
+          puts "Executing: #{cmd.to_s.yellow}"
+          result = cmd.execute
+          if !result then
+            puts "#{'FAILED'.red} :: #{cmd.to_s.yellow}"
+            return false
+          end
+        elsif cmd.is_a? Proc
+          puts "Executing: #{'Inline Procedure'.yellow}"
+          result = cmd.call
+          if !result then
+            puts "#{'FAILED'.red} :: #{'Inline Procedure'.yellow}"
+            return false
+          end
+        end
+      end
+    end
+  
+    commands.each{|command| command.cleanup }
+    return true
+  end
+
+  def to_s
+    "cd #{@dir}"
+  end
+
+end
+
+
+
+class Flags
+  attr_accessor :platform
+  attr_accessor :clean_flag
+  attr_accessor :ensure_upstream
+  attr_accessor :ensure_downstream
+  attr_accessor :build_flag
+  attr_accessor :libraries
+  attr_accessor :help_flag
+  attr_accessor :verbose_flag
+
+  def initialize(arguments)
+    self.platform = ''
+    self.clean_flag = false
+    self.ensure_upstream = false
+    self.ensure_downstream = false
+    self.build_flag = true
+    self.libraries = []
+    self.help_flag = false
+    self.verbose_flag = false
+
+    arguments.each do |item|
+      case item
+      when '--clean'
+        self.clean_flag = true
+      when '--upstream'
+        self.ensure_upstream = true
+      when '--downstream'
+        self.ensure_downstream = true
+      when /--platform=(.*)/
+        self.platform = $1.lstrip.rstrip
+      when /-p=(.*)/
+        self.platform = $1.lstrip.rstrip
+      when '--help'
+        self.help_flag = true
+      when '--verbose'
+        self.verbose_flag = true
+      when '-v'
+        self.verbose_flag = true
+      else
+        self.libraries << item
+      end
+    end
+  end
+
+  def has_platform?
+    return !self.platform.nil? && !self.platform.empty?
+  end
+
+  def print_tasks
+    puts 'Build Dependencies Tasks:'
+    puts '--help - Print this message'
+    puts '--platform=<platform> or -p=<platform> - Use <platform> for the dependency build [required]'
+    puts '--clean - Clean the build directories'
+    puts '--upstream - Ensure upstream libraries are built before building selected libraries'
+    puts '--downstream - Ensure downstream libraries are built after building selected libraries'
+    puts '<library> - Build the specified dependency library and its downstream libraries'
+    puts '--verbose or -v - Enable verbose output'
+    exit! 0
+  end
+    
+end
+
+class DependencyBuilder
+  def initialize dependency_map, flags
+    @dependency_map = dependency_map
+    @flags = flags
+  end
+
+  def build_single target
+    return build_list([ target ])
+  end
+
+  def build_all
+    return build_list(@dependency_map.keys)
+  end
+
+  def build_list targets
+    built = {}
+    result = build_multiple_targets targets, built
+    puts '', "Built Dependencies: #{built_to_s(built)}" unless built.empty?
+    # return true
+    return result
+  end
+
+private
+  def build_single_target target, built, upstream_override
+    # If we are provided with a path then find a matching target key entry for that path
+    alt = @dependency_map.select {|key, val| val[:path] == target }
+    if alt != nil && alt.length > 0
+      puts "Building Dependency #{alt.keys.first.cyan} from given path #{target.magenta}"
+      target = alt.keys.first
+    end
+
+    if !@dependency_map.key?(target) then
+      puts "#{'FAILED'.red} :: No such dependency `#{target.yellow}`"
+      return false
+    end
+
+    configuration = @dependency_map[target]
+
+    return false unless build_multiple_targets(configuration[:depends] || [], built, upstream_override) if @flags.ensure_upstream || upstream_override
+    
+    puts "Target #{target} already built" if built.key?(target) && @flags.verbose_flag
+    return true if built.key?(target)
+
+    puts "Assembling dependency: #{target.cyan}"
+    result = false
+    path = configuration[:path] || target
+    pwd = "#{Dir.pwd}/#{path}"
+    puts "Working Directory: #{pwd}" if @flags.verbose_flag
+    output = configuration[:output]
+    output = output.gsub(/\$\{pwd\}/, pwd)
+    @dependency_map.each do |key, val|
+        output = output.gsub(/\$\{#{key}\}/, (val[:path] || key))
+    end
+
+    if Dir.exist?(output) && !@flags.clean_flag
+      puts "Output directory #{output} exists for target #{target}" if @flags.verbose_flag
+      puts "#{'SUCCESS:'.blue} :: #{target.cyan} :: #{output}"
+      built[target] = true
+      return true
+    end
+
+    subs = @dependency_map.transform_values{|val| val[:path] }
+    subs[:output] = output
+
+    result = CommandExecutor.new(pwd, configuration[:clean], subs).execute if @flags.clean_flag
+    puts "#{'ERROR:'.red} Clean commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.clean_flag && @flags.verbose_flag
+    return false if !result && @flags.clean_flag
+    result = CommandExecutor.new(pwd, configuration[:build], subs).execute if @flags.build_flag
+    puts "#{'ERROR:'.red} Build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
+    puts "#{'SUCCESS:'.green} :: #{target.cyan}" if result
+    return false unless result
+
+    return false unless build_multiple_targets(get_downstream(target), built, upstream_override || true) if @flags.ensure_downstream
+
+    built[target] = true
+    return true
+  end
+
+  def build_multiple_targets targets, built, upstream_override = false
+    return true if targets.empty?
+    targets.each do |target|
+      matches = /(\.\\)?([^\\\/]+)[\\\/]?$/.match(target)
+      target = matches[2] unless matches.nil?
+
+      return false unless build_single_target(target, built, upstream_override)
+    end
+    return true
+  end
+
+  def get_downstream target
+    downstream = []
+    @dependency_map.each{|name, dependency|
+      next if target == name
+      depends = dependency[:depends]
+      downstream << name unless depends.nil? || !depends.include?(target)
+    }
+    return downstream
+  end
+
+  def built_to_s built
+    return "#{built.keys.map{|target| target.cyan }.join(', ')}"
+  end
+
+end
+
+
+
+flags = Flags.new(ARGV)
+
+if flags.help_flag then
+  flags.print_tasks
+end
+  
+if !flags.has_platform? then
+  puts "#{'ERROR'.red} :: Platform parameter must be specified", ''
+  flags.print_tasks
+end
+
+# This require must define a function named `build_deps_hash` which returns a hash with the expected content
+# Use `pwd` here so we can require a file relative to the current path instead of the script location.
+require "#{Dir.pwd}/deps-#{flags.platform}"
+deps = build_deps_hash()
+
+builder = DependencyBuilder.new(deps, flags)
+
+if flags.libraries.empty?
+  builder.build_all
+else
+  builder.build_list flags.libraries
+end
