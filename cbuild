@@ -154,6 +154,7 @@ end
 
 class Builder
     attr_accessor :target, :output, :mode
+    attr_accessor :pwd, :subs
     attr_accessor :source_dirs, :source_filters
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
@@ -285,6 +286,7 @@ private
         subs.each do |key, val|
             string = string.gsub(/\$\{#{key}\}/, val)
         end
+        string
     end
     
     def get_options type, mode
