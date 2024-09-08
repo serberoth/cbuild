@@ -216,6 +216,7 @@ class Builder
         self.subs = @properties["deps"].clone || {}
         self.subs['target'] = self.target
         self.subs['output'] = self.output
+        self.subs['abs_target'] = "#{self.output}/exec/#{self.target}"
         self.subs['mode'] = self.mode
         self.subs['pwd'] = self.pwd
 
@@ -497,7 +498,13 @@ private
         if !self.linker.empty? && (object_list.length > 0) && (object_list.length == source_list.length)
             puts "#{'Linking Target'.yellow}: #{self.target.white.bold}"
             options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
-            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options} #{include_dirs}"
+            command = ''
+            # This just feels like a total hack to get static libraries working....
+            if self.linker == 'ar' then
+                command = "#{self.linker} cru #{target} #{object_list.join(' ')} #{options} && ranlib #{target}"
+            else
+                command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options} #{include_dirs}"
+            end
             puts command.cyan if verbose
             puts %x{ #{command} }
 
