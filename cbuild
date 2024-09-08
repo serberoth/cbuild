@@ -1,4 +1,6 @@
 #!/usr/bin/env ruby
+# -*- mode: ruby; -*-
+# vi: set ft=ruby :
 
 require 'fileutils'
 require 'find'
@@ -197,6 +199,7 @@ class Builder
 
         @host = OS.which?
 
+        self.pwd = Dir.pwd
         self.target = @properties['target'] || 'output'
         self.output = @properties['output'] || './build'
         self.mode = flags.build_mode
@@ -205,6 +208,15 @@ class Builder
         elsif self.mode == 'global'
             self.mode = 'release'
         end
+
+        # Build a property substitution hash this will replace any `${xxx}` in the source string with the value from the hash
+        # This allows us to handle dependencies with version numbers in them in a single place, operating mode, target and
+        # output folders and the current working directory.
+        self.subs = @properties["deps"].clone || {}
+        self.subs['target'] = self.target
+        self.subs['output'] = self.output
+        self.subs['mode'] = self.mode
+        self.subs['pwd'] = self.pwd
 
         self.compiler = @properties['cc'] || 'cc'
         self.linker = @properties['ld'] || 'ld'
@@ -225,7 +237,9 @@ class Builder
         # self.profiler_options, self.profiler_mode_options = get_options('profiler', flags.profiler_mode)
 
         self.prebuild = @properties['prebuild'] || []
+        self.prebuild.map! {|cmd| substitute_for(cmd) }
         self.postbuild = @properties['postbuild'] || []
+        self.postbuild.map! {|cmd| substitute_for(cmd) }
     end
 
     def clean
@@ -266,6 +280,13 @@ private
         filters += @properties["filters.#{@host}"] || []
     end
 
+    def substitute_for string
+        subs = self.subs || {}
+        subs.each do |key, val|
+            string = string.gsub(/\$\{#{key}\}/, val)
+        end
+    end
+    
     def get_options type, mode
         if !@properties["#{type}.options"].nil?
             if @properties["#{type}.options"].class == Array
@@ -274,6 +295,10 @@ private
                 mode_options = @properties["#{type}.#{mode}.options"] || []
                 mode_options = (mode_options + (@properties["#{type}.#{mode}.#{@host}.options"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.test.options"] || [])).uniq) if @flags.test_flag
+                if !@properties["deps"].nil?
+                    options.map! {|opt| substitute_for(opt) }
+                    mode_options.map! {|opt| substitute_for(opt) }
+                end
                 return options, mode_options
             elsif @properties["#{type}.options"].class == Hash
                 options = @properties["#{type}.options"]['global'] || []
@@ -281,6 +306,10 @@ private
                 mode_options = @properties["#{type}.options"][mode] || []
                 mode_options = (mode_options + (@properties["#{type}.options"]["#{mode}.#{@host}"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.options"]['test'] || [])).uniq) if @flags.test_flag
+                if !@properties["deps"].nil?
+                    options.map! {|opt| substitute_for(opt) }
+                    mode_options.map! {|opt| substitute_for(opt) }
+                end
                 return options, mode_options
             end
         end

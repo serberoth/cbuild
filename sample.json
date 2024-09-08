@@ -1,4 +1,10 @@
 {
+    // 'deps' is the set of dependency libraries that we can reference in our commands and options later in the
+    // build process. This eases the maintenance and upgrade of versions throughout the lifetime of our project.
+    // (optional - default: none)
+    "deps": {
+        "openssl":      "openssl-X.Y.Z"
+    },
     // 'target' is the name of the output executable or library
     // (*required*)
     "target": "sample",
@@ -10,20 +16,20 @@
     "sources": [ "src" ],
     // 'output' is the build target output directory the final binary output is placed in the '<output>/exec'
     // directory, while temporary object files are placed in the '<output>/objs' folder.
-    // (optional default: ./build)
+    // (optional - default: ./build)
     "output": "./build",
     // 'cc' defines which compiler to invoke during the compilation process
-    // (optional default: cc)
+    // (optional - default: cc)
     "cc": "clang",
     // 'ld' defines which linker to invoke during the linking stage
-    // (optional default: ld)
+    // (optional - default: ld)
     "ld": "lld",
     // 'language' defines which language standard to use during compilation
-    // (optional default: c17)
+    // (optional - default: c17)
     "language": "c17",
     // 'filters' is an array of regular expressions to filter source files in the specified folders
     // The regular expression filters define which files are accepted into the compilation phase
-    // (optional default: extension based filter for c/c++ file types)
+    // (optional - default: extension based filter for c/c++ file types)
     "filters": [ ".*\\.c" ],
     // 'compiler.options' is an either an object or an array (see 'linker.options') array of options passed
     // directly to the compiler during the compilation phase.  The values in the 'compiler.options' object
@@ -31,28 +37,28 @@
     // parameters that are passed to the compiler regardless of the selected build mode.  The default build
     // mode 'release' is used when no mode is explicitly specified by command line parameter.  Other build
     // modes contain parameters that are passed to the compiler when the specific build mode is requested.
-    // (optional default: none)
+    // (optional - default: none)
     "compiler.options": {
-        "global": [ "-Wall" ],
+        "global": [ "-Wall", "-I./${openssl}/release/include" ],
         "debug": [ "-g", "-O0" ],
         "release": [ "-O3" ]
     },
     // 'linker.options' is an either an object (see 'compiler.options') or an array of options which are
     // passed directly to the linker during the linking stage.  The values in 'linker.options' represent
     // the special 'global' build mode which will supply parameters regardless of the invoked build mode.
-    // (optional default: none)
-    "linker.options": [ "-lm64" ],
+    // (optional - default: none)
+    "linker.options": [ "-lm64", "-L./deps/${openssl}/release/lib" ],
     // 'linker.<mode>.options' is an array of options (used only when 'linker.options is an array) passed
     // directly to the linker during the linking stage when the specified build mode is invoked.  The
     // default mode 'release' is used when none is specified by command line parameter.
-    // (optional default: none)
+    // (optional - default: none)
     "linker.<mode>.options": [ "-g" ],
     // 'prebuild' is an array of commands that are executed prior to the assemble phase of the build process
     // if any command fails the entire build process fails.
-    // (optional default: none)
+    // (optional - default: none)
     "prebuild": [ "ls -al" ],
     // 'postbuild' is an array of commands that are executed following the assemble phase of the build process
     // if any command fails the build is considered to have failed.
-    // (optional default: none)
+    // (optional - default: none)
     "postbuild": [ "ls -al ./build/exec/" ]
 }
