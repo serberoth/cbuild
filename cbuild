@@ -238,10 +238,8 @@ class Builder
         self.analyzer_options, self.analyzer_mode_options = get_options('analyzer', flags.analyzer_mode)
         # self.profiler_options, self.profiler_mode_options = get_options('profiler', flags.profiler_mode)
 
-        self.prebuild = @properties['prebuild'] || []
-        self.prebuild.map! {|cmd| substitute_for(cmd) }
-        self.postbuild = @properties['postbuild'] || []
-        self.postbuild.map! {|cmd| substitute_for(cmd) }
+        self.prebuild = get_commands('prebuild', mode, flags.test_flag)
+        self.postbuild = get_commands('postbuild', mode, flags.test_flag)
     end
 
     def clean
@@ -252,7 +250,9 @@ class Builder
 
     def test
         puts 'Building and executing test suite'
+        exec_prebuild
         result = assemble_run_tests
+        # postbuild commands are executed prior to the test suite execution
 
         puts "#{'FAILED'.red} - Test suites failed; see output for details" unless result
         puts "#{'SUCCESS'.green} - Unit tests completed successfully" if result
@@ -270,7 +270,7 @@ class Builder
     def analyze
         exec_prebuild
         result = assemble_static_analysis
-        # exec_postbuild
+        exec_postbuild if result
 
         puts "#{'FAILED'.red} - See analysis output for details" unless result
         puts "#{'SUCCESS'.green} - Analysis completed successfully" if result
@@ -290,6 +290,14 @@ private
         string
     end
     
+    def get_commands type, mode, test_flag
+        commands = @properties["#{type}"] || []
+        commands = (@properties["#{type}.#{mode}"] || []) if !test_flag && @properties["#{type}.#{mode}"]
+        commands = (@properties["#{type}.test"] || []) if test_flag && @properties["#{type}.test"]
+        commands.map! {|cmd| substitute_for(cmd) }
+        return commands
+    end
+
     def get_options type, mode
         if !@properties["#{type}.options"].nil?
             if @properties["#{type}.options"].class == Array
@@ -411,7 +419,7 @@ private
             Find.find(self.test_dir) do |path|
                 next if filter? path
                 # skip tests that are not specified in the list
-                puts "#{self.test_dir} #{path} :: !#{test_list}.include?(#{path[(self.test_dir.length+1)...-2]}) == #{!self.test_list.include?(path[self.test_dir.length, -2])}" if verbose && !self.test_list.empty?
+                puts "#{self.test_dir} #{path} :: !#{test_list}.include?(#{path[(self.test_dir.length+1)...-2]}) == #{!self.test_list.include?(path[(self.test_dir.length+1)...-2])}" if verbose && !self.test_list.empty?
                 next if !self.test_list.empty? && !self.test_list.include?(path[(self.test_dir.length+1)...-2])
 
                 count += 1
@@ -419,6 +427,8 @@ private
                 commands.append([path, cmd]) unless cmd.nil?
                 failures.append(path) if cmd.nil?
             end
+            
+            exec_postbuild unless (count == 0) || (failures.length > 0)
 
             results = []
             commands.each{|path, cmd|
