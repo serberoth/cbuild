@@ -155,7 +155,7 @@ end
 class Builder
     attr_accessor :target, :output, :mode
     attr_accessor :pwd, :subs
-    attr_accessor :source_dirs, :source_filters
+    attr_accessor :source_dirs, :source_allow_filters, :source_deny_filters
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
     attr_accessor :linker, :linker_options, :linker_mode_options
@@ -166,7 +166,7 @@ class Builder
 
     def initialize(flags)
         extension = File.extname(flags.properties_file)
-        puts "#{"Loading Configuration File:}".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
+        puts "#{"Loading Configuration File:".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
         if '.yml' == extension || '.yaml' == extension then
             if !File.exist? flags.properties_file
                 puts "#{'ERROR'.red}: Project YAML #{flags.properties_file.white.bold} does not exists in the current directory."
@@ -228,7 +228,8 @@ class Builder
         self.language_cpp = @properties['language.cpp'] || 'c++17'
 
         self.source_dirs = @properties['sources'] || [ './' ]
-        self.source_filters = get_filters()
+        self.source_allow_filters = get_filters(nil) + get_filters('allow')
+        self.source_deny_filters = get_filters('deny')
 
         self.test_dir = @properties['tests'] || './test'
         self.test_list = flags.test_list || []
@@ -277,9 +278,16 @@ class Builder
     end
 
 private
-    def get_filters
-        filters = @properties['filters'] || []
-        filters += @properties["filters.#{@host}"] || []
+    def get_filters kind
+        if kind.nil? then
+            filters = @properties['filters'] || []
+            filters += @properties["filters.#{@host}"] || []
+            return filters
+        else
+            filters = @properties["filters.#{kind}"] || []
+            filters += @properties["filters.#{kind}.#{@host}"] || []
+            return filters
+        end
     end
 
     def substitute_for string
@@ -555,6 +563,7 @@ private
         return false
     end
 
+    # Returns true when we want to filter (deny) the provided filename
     def filter? name
         verbose = @flags.verbose_flag
 
@@ -563,18 +572,30 @@ private
         end
 
         # Filter the files in the source directory
-        if self.source_filters.length == 0
-            puts "Reviewing: #{name}".cyan if verbose
+        if self.source_allow_filters.length == 0
+            puts "Reviewing (allow): #{name}".cyan if verbose
             extension = File.extname name
-            return true if [ '.h', '.o', '.swp', '.sh', '.bat', '.cmd', '.ps1' ].include? extension
             return true unless [ '.c', '.cc', '.cpp', '.cxx', '.c++' ].include? extension
         else
             match = false
-            self.source_filters.each do |filter|
-                puts "Reviewing: #{name} => #{filter} -> #{name} :: #{name.match? Regexp.new(filter)}".cyan if verbose
+            self.source_allow_filters.each do |filter|
+                puts "Reviewing (allow): #{name} => #{filter} -> #{name} :: #{name.match? Regexp.new(filter)}".cyan if verbose
                 match ||= name.match? Regexp.new(filter)
             end
             return true unless match
+        end
+
+        if self.source_deny_filters.length == 0
+          puts "Reviewing ( deny): #{name}".cyan if verbose
+          extension = File.extname name
+          return true if [ '.h', '.o', '.swp', '.sh', '.bat', '.cmd', '.ps1', '.exe' ].include? extension
+        else
+            match = false
+            self.source_deny_filters.each do |filter|
+                puts "Reviewing ( deny): #{name} => #{filter} -> #{name} :: #{name.match? Regexp.new(filter)}".cyan if verbose
+                match ||= name.match? Regexp.new(filter)
+            end
+            return match
         end
 
         false

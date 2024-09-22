@@ -14,6 +14,10 @@
     // that is then linked to form the target.
     // (*required*)
     "sources": [ "src" ],
+    // 'tests' is a string containing a folder with source for the project's test to be compiled.  Tests are
+    // compiled from each file found in the source folder and are executed accordingly.
+    // (optional - default: none)
+    "tests": "test",
     // 'output' is the build target output directory the final binary output is placed in the '<output>/exec'
     // directory, while temporary object files are placed in the '<output>/objs' folder.
     // (optional - default: ./build)
@@ -57,8 +61,16 @@
     // if any command fails the entire build process fails.
     // (optional - default: none)
     "prebuild": [ "ls -al" ],
+    // 'prebuild.<mode>' is an array of commands that are executed prior to the assemble phase of the build
+    // process if any command fails the entire build process fails.  This overrides any 'prebuild' commands.
+    "prebuild.<mode>": [ "ls -al" ],
     // 'postbuild' is an array of commands that are executed following the assemble phase of the build process
     // if any command fails the build is considered to have failed.
     // (optional - default: none)
-    "postbuild": [ "ls -al ./build/exec/" ]
+    "postbuild": [ "ls -al ./build/exec/" ],
+    // 'postbuild.<mode>' is an array of commands that are executed following the assemble phase of the build
+    // process if any command fails the build is considered to have failed.  This overrides any 'postbuild'
+    // commands.
+    // (optional - default: none)
+    "postbuild.<mode>": [ "ls -al ./build/exec/" ]
 }
