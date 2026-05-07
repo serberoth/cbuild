@@ -1,5 +1,4 @@
-*cbuild*
-===
+# *cbuild*
 
 cbuild is a simple build process for C/C++ projects that is controlled by a JSON project file.
 See sample.json for a JSON with comments containing a sample of the available options for the
@@ -18,4 +17,4 @@ The default target compilation mode is 'release' when not specified.
 
 cbuild requires ruby 2.6+ with the 'fileutils', 'find', and 'json' standard library packages.
 
-Copyright (c) 2019 DarkMatter Software, all rights reserved.
+Copyright (c) 2019-2026 DarkMatter Software, all rights reserved.
