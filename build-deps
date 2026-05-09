@@ -52,35 +52,6 @@ end
 
 
 
-class EnvSetter
-  include Command
-
-  def initialize(name, value)
-    @name = name
-    @original = ENV[@name]
-    @value = value
-  end
-
-  def substitute subs, pwd
-    @value = substitute_for(@value, subs, pwd)
-  end
-
-  def execute
-    ENV[@name] = @value
-    return true
-  end
-
-  def cleanup
-    ENV[@name] = @original
-    return true
-  end
-
-  def to_s
-    "ENV[#{@name}] == #{@value}"
-  end
-
-end
-
 class FileRemover
   include Command
 
@@ -172,8 +143,46 @@ class CloneCommand
 
 end
 
+class EnvSetter
+  include Command
+
+  def initialize(name, value)
+    @name = name
+    @original = ENV[@name]
+    @value = value
+  end
+
+  def substitute subs, pwd
+    @value = substitute_for(@value, subs, pwd)
+  end
+
+  def execute
+    ENV[@name] = @value
+    return true
+  end
+
+  def cleanup
+    ENV[@name] = @original
+    return true
+  end
+
+  def to_s
+    "ENV[#{@name}] == #{@value}"
+  end
+
+  def self.from_h hash
+    if hash[:type] == 'EnvVar'
+      return EnvSetter.new(hash[:key], hash[:value])
+    end
+    return nil
+  end
+
+end
+
 class CommandExecutor
   include Command
+
+  COMMAND_SET = [ EnvSetter, CommandExecutor ]
 
   attr_accessor :dir, :subs
   
@@ -190,34 +199,25 @@ class CommandExecutor
 
   def execute
     commands = []
+    puts "Current Directory: #{Dir.pwd.yellow} => #{@dir.cyan}"
     Dir.chdir(@dir) do
+      puts "Current Directory: #{Dir.pwd.yellow}"
       @commands.each do |cmd|
         pwd = Dir.pwd
         if cmd.is_a? String
-          cmd = substitute_for(cmd, @subs, pwd)
-          puts "Executing: #{cmd.yellow}"
-          puts %x{ #{cmd} }
-          result = $?.exited? && ($?.exitstatus == 0)
-          if !result then
-            puts "#{'FAILED'.red} :: #{cmd.yellow}"
-            return false
-          end
+          return false if !self.execute_direct(cmd, pwd)
+        elsif cmd.is_a? Hash
+          command = COMMAND_SET.map {|type| type.from_h cmd } .select {|s| !s.nil?} .first
+          puts "#{'FAILED'.red} :: #{cmd.yellow}" if command.nil?
+          return false if command.nil?
+
+          commands << command
+          return false if !self.execute_command(command, pwd)
         elsif cmd.is_a? Command
           commands << cmd
-          cmd.substitute(@subs, pwd)
-          puts "Executing: #{cmd.to_s.yellow}"
-          result = cmd.execute
-          if !result then
-            puts "#{'FAILED'.red} :: #{cmd.to_s.yellow}"
-            return false
-          end
+          return fale if !self.execute_command(cmd, pwd)
         elsif cmd.is_a? Proc
-          puts "Executing: #{'Inline Procedure'.yellow}"
-          result = cmd.call
-          if !result then
-            puts "#{'FAILED'.red} :: #{'Inline Procedure'.yellow}"
-            return false
-          end
+          return false if !self.execute_proc(cmd, pwd)
         end
       end
     end
@@ -227,7 +227,45 @@ class CommandExecutor
   end
 
   def to_s
-    "cd #{@dir}"
+    "cd #{@dir} => [ #{@commands[0].length > 20 ? @commands[0][0..20] : commands[0]} ... ]"
+  end
+
+  def self.from_h hash
+    if hash[:type] == 'CommandList'
+      return CommandExecutor.new(hash[:rel_path], hash[:commands], {})
+    end
+    return nil
+  end
+
+private
+  def execute_direct cmd, pwd
+    cmd = substitute_for(cmd, @subs, pwd)
+    puts "Executing: #{cmd.yellow}"
+    puts %x{ #{cmd} }
+    result = $?.exited? && ($?.exitstatus == 0)
+    if !result then
+      puts "#{'FAILED'.red} :: #{cmd.yellow}"
+    end
+    return result
+  end
+
+  def execute_command cmd, pwd
+    cmd.substitute(@subs, pwd)
+    puts "Executing: #{cmd.to_s.yellow}"
+    result = cmd.execute
+    if !result then
+      puts "#{'FAILED'.red} :: #{cmd.to_s.yellow}"
+    end
+    return result
+  end
+
+  def execute_proc proc, pwd
+    puts "Executing: #{'Inline Procedure'.yellow}"
+    result = cmd.call
+    if !result then
+      puts "#{'FAILED'.red} :: #{'Inline Procedure'.yellow}"
+    end
+    return result
   end
 
 end
@@ -385,6 +423,7 @@ private
     result = CommandExecutor.new(pwd, configuration[:clean], subs).execute if @flags.clean_flag
     puts "#{'ERROR:'.red} Clean commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.clean_flag && @flags.verbose_flag
     return false if !result && @flags.clean_flag
+
     result = CommandExecutor.new(pwd, configuration[:build], subs).execute if @flags.build_flag
     puts "#{'ERROR:'.red} Build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
     puts "#{'SUCCESS:'.green} :: #{target.cyan}" if result
@@ -436,6 +475,7 @@ if !flags.has_platform? then
   flags.print_tasks
 end
 
+# TODO: Update build-deps to load JSON or YAML like cbuild instead of arbitrary ruby scripts
 # This require must define a function named `build_deps_hash` which returns a hash with the expected content
 # Use `pwd` here so we can require a file relative to the current path instead of the script location.
 require "#{Dir.pwd}/deps-#{flags.platform}"
