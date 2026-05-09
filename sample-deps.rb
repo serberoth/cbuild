@@ -8,6 +8,17 @@ def build_deps_hash()
         'zlib' => {
             # The relative path to the library we want to build
             path: 'zlib-X.Y.Z',
+            # An optional parameter that will clone the given repository from the provided git URI to a directory defined
+            # by the path field.
+            # NOTE: This parameter **cannot** be supplied with the `archive` field.
+            repository: 'https://github.com/user/repo.git',
+            # An optional parameter that will extract the dependency from an archive from the provided directory with the
+            # name of the path and the extension '.tar.gz'
+            # This parameter can be supplied as a hash with keys :name, :path, :extension to represent the various options
+            # NOTE: If the hash is supplied all three (3) fields (:name, :path, :extension) must be provided.
+            # NOTE: This parameter **cannot** be supplied with the `repository` field.
+            archive: 'archives/',
+            archive: { name: 'zlib-X.Y.Z', path: 'archives/', extension: '.tar.gz', },
             # The output path to the library we can use the ${pwd} placeholder to insert the current working directory
             output: '${pwd}/release',
             # The command set to execute to clean the library
@@ -37,10 +48,9 @@ def build_deps_hash()
             ],
             build: [
                 # We can use the EnvSetter class to set environment variables for the subsequent shell commands
-                # NOTE: When we set these variables we do have to know/undersstand the relative position of our
-                # dependency libraries from each other within our project structure.
-                EnvSetter.new('ZLIBLIB', '${pwd}/../${zlib}/release/lib'),
-                EnvSetter.new('ZLIBINC', '${pwd}/../${zlib}/release/include'),
+                # NOTE: The substitution pattern ${[name]>>path} will provide the absolute path to that dependency
+                EnvSetter.new('ZLIBLIB', '${zlib>>path}/release/lib'),
+                EnvSetter.new('ZLIBINC', '${zlib>>path}/release/include'),
                 'configure --prefix="${output}"',
                 'make',
                 'make install',

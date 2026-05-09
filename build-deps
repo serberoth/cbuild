@@ -107,6 +107,71 @@ class FileRemover
 
 end
 
+class Extractor
+  include Command
+
+  attr_accessor :archive
+
+  def initialize(archive, path, extension)
+    @archive = archive
+    @path = path
+    @extension = extension
+  end
+
+  def substitute subs, pwd
+  end
+
+  def execute
+    archive = "#{@path}#{@archive}#{@extension}"
+    out_path = "#{Dir.pwd}/#{@archive}"
+    if !Dir.exist?(out_path)
+      puts "Extracting archive '#{archive}' did not previously exist at '#{out_path}'"
+      puts %x{ tar -zxf \"#{archive}\" }
+      result = $?.exited? && ($?.exitstatus == 0)
+      return result
+    end
+
+    puts "Archive '#{archive}' previously extracted to '#{out_path}'"
+    return true
+  end
+
+end
+
+class CloneCommand
+  include Command
+
+  attr_accessor :repository
+
+  def initialize(repository, path)
+    @repository = repository
+    @path = path
+  end
+
+  def substitute subs, pwd
+  end
+
+  def execute
+    /^.+\/([^\.]+)\.git$/.match(@repository)
+    if !Dir.exist?(@path)
+      puts "Cloning '#{@repository}' into '#{@path}'"
+      puts %x{ git clone \"#{@repository}\" \"#{@path}\" }
+      result = $?.exited? && ($?.exitstatus == 0)
+      return result
+    end
+    
+    puts "Repository '#{@repository}' previously cloned into '#{@path}'"
+    Dir.chdir(@path) do
+      puts %x{ git status }
+      result = $?.exited? && ($?.exitstatus == 0)
+      return result if !result
+      puts %x{ git pull }
+      result = $?.exited? && ($?.exitstatus == 0)
+      return result
+    end
+  end
+
+end
+
 class CommandExecutor
   include Command
 
@@ -293,7 +358,29 @@ private
     end
 
     subs = @dependency_map.transform_values{|val| val[:path] }
+    subs.update(@dependency_map.map{|key, val| [ "#{key}>>path", "#{Dir.pwd}/#{val[:path]}" ]}.to_h)
     subs[:output] = output
+
+    if configuration[:repository] && configuration[:archive]
+      puts "#{'ERROR'.red} Configuration cannot have repository and archive fields" if !result
+      return false
+    end
+
+    if configuration[:repository]
+      result = CloneCommand.new(configuration[:repository], pwd).execute
+      puts "#{'ERROR'.red} Failed to clone repository #{configuration[:repository].cyan}" if !result
+      return false if !result
+    elsif configuration[:archive]
+      archive, archive_path, archive_extension = nil, nil, nil
+      (archive, archive_path = path, configuration[:archive]) if configuration[:archive].is_a?(String)
+      (archive, archive_path, archive_extension = configuration[:archive][:name], configuration[:archive][:path], configuration[:archive][:extension]) if configuration[:archive].is_a?(Hash)
+      archive_path = "#{Dir.pwd}/#{archive_path}"
+      archive_extension = '.tar.gz' if archive_extension.nil?
+      puts "Extracting archive #{archive.cyan}#{archive_extension.cyan} at #{archive_path.magenta}"
+      result = Extractor.new(archive, archive_path, archive_extension).execute
+      puts "#{'ERROR'.red} Failed to extract archive #{archive.cyan}#{archive_extension.cyan} at #{archive_path.magenta}" if !result
+      return false if !result
+    end
 
     result = CommandExecutor.new(pwd, configuration[:clean], subs).execute if @flags.clean_flag
     puts "#{'ERROR:'.red} Clean commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.clean_flag && @flags.verbose_flag
