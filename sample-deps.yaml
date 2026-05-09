@@ -1,0 +1,58 @@
+# We define the build_deps_hash function that takes no parameters and returns a hash containing
+# the build information for the dependency libraries we wish to build.
+{
+    # Dependency library we want to build (this is a name we can reference elsewhere)
+    # This allows us to name the library and reference it later independant of its version
+    # number as we maintain and upgrade our dependencies throughout the projects lifetime.
+    zlib: {
+        # The relative path to the library we want to build
+        path: 'zlib-X.Y.Z',
+        # An optional parameter that will clone the given repository from the provided git URI to a directory defined
+        # by the path field.
+        # NOTE: This parameter **cannot** be supplied with the `archive` field.
+        repository: 'https://github.com/user/repo.git',
+        # An optional parameter that will extract the dependency from an archive from the provided directory with the
+        # name of the path and the extension '.tar.gz'
+        # This parameter can be supplied as a hash with keys :name, :path, :extension to represent the various options
+        # NOTE: If the hash is supplied all three (3) fields (:name, :path, :extension) must be provided.
+        # NOTE: This parameter **cannot** be supplied with the `repository` field.
+        archive: 'archives/',
+        archive: { name: 'zlib-X.Y.Z', path: 'archives/', extension: '.tar.gz', },
+        # The output path to the library we can use the ${pwd} placeholder to insert the current working directory
+        output: '${pwd}/release',
+        # The command set to execute to clean the library
+        clean: [
+            # Strings are executed as standard shell commands.  This allows us to use the libraries standard
+            # commands to build the library as desired for our project for ease of maintenance.
+            'rm -Rf release',
+            'make clean',
+        ],
+        # The command set to execute to build the library
+        build: [
+            # We can use the ${output} placeholder to insert the desired output path into our commants
+            'configure --prefix="${output}" --64',
+            'make',
+            'make install',
+        ],
+    },
+    libpng: {
+        path: 'libpng-X.Y.Z',
+        output: '${pwd}/release',
+        # This is a list of the libraries that this library depends on; if not built they will be built before this library 
+        # If we rebuild the dependenct it will cause a rebuild of this library
+        depends: [ 'zlib' ],
+        clean: [
+            'rm -Rf release',
+            'make clean',
+        ],
+        build: [
+            # We can use the EnvSetter class to set environment variables for the subsequent shell commands
+            # NOTE: The substitution pattern ${[name]>>path} will provide the absolute path to that dependency
+            EnvSetter.new('ZLIBLIB', '${zlib>>path}/release/lib'),
+            EnvSetter.new('ZLIBINC', '${zlib>>path}/release/include'),
+            'configure --prefix="${output}"',
+            'make',
+            'make install',
+        ],
+    },
+}
