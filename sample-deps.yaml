@@ -48,8 +48,8 @@
         build: [
             # We can use the EnvSetter class to set environment variables for the subsequent shell commands
             # NOTE: The substitution pattern ${[name]>>path} will provide the absolute path to that dependency
-            EnvSetter.new('ZLIBLIB', '${zlib>>path}/release/lib'),
-            EnvSetter.new('ZLIBINC', '${zlib>>path}/release/include'),
+            { type: 'EnvVar', key: 'ZLIBLIB', value: '${zlib>>path}/release/lib', },
+            { type: 'EnvVar', key: 'ZLIBINC', value: '${zlib>>path}/release/include', },
             'configure --prefix="${output}"',
             'make',
             'make install',
