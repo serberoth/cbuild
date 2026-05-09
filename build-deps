@@ -200,9 +200,7 @@ class CommandExecutor
 
   def execute
     commands = []
-    puts "Current Directory: #{Dir.pwd.yellow} => #{@dir.cyan}"
     Dir.chdir(@dir) do
-      puts "Current Directory: #{Dir.pwd.yellow}"
       @commands.each do |cmd|
         pwd = Dir.pwd
         if cmd.is_a? String

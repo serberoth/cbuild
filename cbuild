@@ -633,7 +633,7 @@ private
             exit!(-1)
         end
 
-        base_filename = "#{pwd}/#{deps}"
+        base_filename = deps[0] == '/' ? "#{deps}" : "#{pwd}/#{deps}"
         filenames = [ "#{base_filename}.yaml", "#{base_filename}.yml", "#{base_filename}.json" ]
         filename = filenames.map {|name| File.exist?(name) ? name : nil } .select {|name| !name.nil? } .first
 
@@ -643,7 +643,7 @@ private
         end
 
         extension = File.extname(filename)
-        pwd = "#{pwd}/#{deps[0...deps.rindex('/')]}"
+        pwd = deps[0] == '/' ? "#{deps[0...deps.rindex('/')]}" : "#{pwd}/#{deps[0...deps.rindex('/')]}"
         deps = {}
 
         if '.yml' == extension || '.yaml' == extension then
