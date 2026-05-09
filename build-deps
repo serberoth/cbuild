@@ -4,6 +4,7 @@
 
 require 'fileutils'
 require 'json'
+require 'yaml'
 
 class String
   %w{black red green yellow blue magenta cyan white}.each_with_index do |colour, index|
@@ -171,8 +172,8 @@ class EnvSetter
   end
 
   def self.from_h hash
-    if hash[:type] == 'EnvVar'
-      return EnvSetter.new(hash[:key], hash[:value])
+    if hash['type'] == 'EnvVar'
+      return EnvSetter.new(hash['key'], hash['value'])
     end
     return nil
   end
@@ -231,8 +232,8 @@ class CommandExecutor
   end
 
   def self.from_h hash
-    if hash[:type] == 'CommandList'
-      return CommandExecutor.new(hash[:rel_path], hash[:commands], {})
+    if hash['type'] == 'CommandList'
+      return CommandExecutor.new(hash['rel_path'], hash['commands'], {})
     end
     return nil
   end
@@ -274,6 +275,7 @@ end
 
 class Flags
   attr_accessor :platform
+  attr_accessor :path
   attr_accessor :clean_flag
   attr_accessor :ensure_upstream
   attr_accessor :ensure_downstream
@@ -284,6 +286,7 @@ class Flags
 
   def initialize(arguments)
     self.platform = ''
+    self.path = Dir.pwd
     self.clean_flag = false
     self.ensure_upstream = false
     self.ensure_downstream = false
@@ -304,6 +307,8 @@ class Flags
         self.platform = $1.lstrip.rstrip
       when /-p=(.*)/
         self.platform = $1.lstrip.rstrip
+      when /--path=(.*)/
+        self.path = $1.lstrip.rstrip
       when '--help'
         self.help_flag = true
       when '--verbose'
@@ -324,19 +329,20 @@ class Flags
     puts 'Build Dependencies Tasks:'
     puts '--help - Print this message'
     puts '--platform=<platform> or -p=<platform> - Use <platform> for the dependency build [required]'
+    puts '--path=<directory> - Use <directory> as the location of the properties and dependencies'
     puts '--clean - Clean the build directories'
     puts '--upstream - Ensure upstream libraries are built before building selected libraries'
     puts '--downstream - Ensure downstream libraries are built after building selected libraries'
     puts '<library> - Build the specified dependency library and its downstream libraries'
     puts '--verbose or -v - Enable verbose output'
-    exit! 0
+    exit! -1
   end
     
 end
 
 class DependencyBuilder
-  def initialize dependency_map, flags
-    @dependency_map = dependency_map
+  def initialize flags
+    @dependency_map = DependencyBuilder.load_properties(flags)
     @flags = flags
   end
 
@@ -359,7 +365,7 @@ class DependencyBuilder
 private
   def build_single_target target, built, upstream_override
     # If we are provided with a path then find a matching target key entry for that path
-    alt = @dependency_map.select {|key, val| val[:path] == target }
+    alt = @dependency_map.select {|key, val| val['path'] == target }
     if alt != nil && alt.length > 0
       puts "Building Dependency #{alt.keys.first.cyan} from given path #{target.magenta}"
       target = alt.keys.first
@@ -372,20 +378,20 @@ private
 
     configuration = @dependency_map[target]
 
-    return false unless build_multiple_targets(configuration[:depends] || [], built, upstream_override) if @flags.ensure_upstream || upstream_override
+    return false unless build_multiple_targets(configuration['depends'] || [], built, upstream_override) if @flags.ensure_upstream || upstream_override
     
     puts "Target #{target} already built" if built.key?(target) && @flags.verbose_flag
     return true if built.key?(target)
 
     puts "Assembling dependency: #{target.cyan}"
     result = false
-    path = configuration[:path] || target
+    path = configuration['path'] || target
     pwd = "#{Dir.pwd}/#{path}"
     puts "Working Directory: #{pwd}" if @flags.verbose_flag
-    output = configuration[:output]
+    output = configuration['output']
     output = output.gsub(/\$\{pwd\}/, pwd)
     @dependency_map.each do |key, val|
-        output = output.gsub(/\$\{#{key}\}/, (val[:path] || key))
+        output = output.gsub(/\$\{#{key}\}/, (val['path'] || key))
     end
 
     if Dir.exist?(output) && !@flags.clean_flag
@@ -395,23 +401,23 @@ private
       return true
     end
 
-    subs = @dependency_map.transform_values{|val| val[:path] }
-    subs.update(@dependency_map.map{|key, val| [ "#{key}>>path", "#{Dir.pwd}/#{val[:path]}" ]}.to_h)
-    subs[:output] = output
+    subs = @dependency_map.transform_values{|val| val['path'] }
+    subs.update(@dependency_map.map{|key, val| [ "#{key}>>path", "#{Dir.pwd}/#{val['path']}" ]}.to_h)
+    subs['output'] = output
 
-    if configuration[:repository] && configuration[:archive]
+    if configuration['repository'] && configuration['archive']
       puts "#{'ERROR'.red} Configuration cannot have repository and archive fields" if !result
       return false
     end
 
-    if configuration[:repository]
-      result = CloneCommand.new(configuration[:repository], pwd).execute
-      puts "#{'ERROR'.red} Failed to clone repository #{configuration[:repository].cyan}" if !result
+    if configuration['repository']
+      result = CloneCommand.new(configuration['repository'], pwd).execute
+      puts "#{'ERROR'.red} Failed to clone repository #{configuration['repository'].cyan}" if !result
       return false if !result
-    elsif configuration[:archive]
+    elsif configuration['archive']
       archive, archive_path, archive_extension = nil, nil, nil
-      (archive, archive_path = path, configuration[:archive]) if configuration[:archive].is_a?(String)
-      (archive, archive_path, archive_extension = configuration[:archive][:name], configuration[:archive][:path], configuration[:archive][:extension]) if configuration[:archive].is_a?(Hash)
+      (archive, archive_path = path, configuration['archive']) if configuration['archive'].is_a?(String)
+      (archive, archive_path, archive_extension = configuration['archive']['name'], configuration['archive']['path'], configuration['archive']['extension']) if configuration['archive'].is_a?(Hash)
       archive_path = "#{Dir.pwd}/#{archive_path}"
       archive_extension = '.tar.gz' if archive_extension.nil?
       puts "Extracting archive #{archive.cyan}#{archive_extension.cyan} at #{archive_path.magenta}"
@@ -420,11 +426,11 @@ private
       return false if !result
     end
 
-    result = CommandExecutor.new(pwd, configuration[:clean], subs).execute if @flags.clean_flag
+    result = CommandExecutor.new(pwd, configuration['clean'], subs).execute if @flags.clean_flag
     puts "#{'ERROR:'.red} Clean commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.clean_flag && @flags.verbose_flag
     return false if !result && @flags.clean_flag
 
-    result = CommandExecutor.new(pwd, configuration[:build], subs).execute if @flags.build_flag
+    result = CommandExecutor.new(pwd, configuration['build'], subs).execute if @flags.build_flag
     puts "#{'ERROR:'.red} Build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
     puts "#{'SUCCESS:'.green} :: #{target.cyan}" if result
     return false unless result
@@ -450,7 +456,7 @@ private
     downstream = []
     @dependency_map.each{|name, dependency|
       next if target == name
-      depends = dependency[:depends]
+      depends = dependency['depends']
       downstream << name unless depends.nil? || !depends.include?(target)
     }
     return downstream
@@ -458,6 +464,37 @@ private
 
   def built_to_s built
     return "#{built.keys.map{|target| target.cyan }.join(', ')}"
+  end
+
+  def self.load_properties flags
+    base_filename = "#{Dir.pwd}/deps-#{flags.platform}"
+    filenames = [ "#{base_filename}.yaml", "#{base_filename}.yml", "#{base_filename}.json" ]
+    filename = filenames.map {|name| File.exist?(name) ? name : nil } .select {|name| !name.nil? } .first
+
+    if filename.nil?
+        puts "#{'ERROR:'.red} :: A configuration file must exist for the specified platform: '#{flags.platform.white.bold}'", ''
+        flags.print_tasks
+    end
+
+    extension = File.extname(filename)
+
+    if '.yml' == extension || '.yaml' == extension then
+      begin
+        return YAML.load(File.read(filename))
+      rescue YAML::SyntaxError => e
+          puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{filename.white.bold}"
+          puts "#{'ERROR'.red}: #{e.message}"
+          exit! -1
+      end
+    end
+
+    begin
+        return JSON.parse(File.read(filename))
+    rescue JSON::JSONError => e
+        puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{filename.white.bold}"
+        puts "#{'ERROR'.red}: #{e.message}"
+        exit! -1
+    end
   end
 
 end
@@ -475,16 +512,12 @@ if !flags.has_platform? then
   flags.print_tasks
 end
 
-# TODO: Update build-deps to load JSON or YAML like cbuild instead of arbitrary ruby scripts
-# This require must define a function named `build_deps_hash` which returns a hash with the expected content
-# Use `pwd` here so we can require a file relative to the current path instead of the script location.
-require "#{Dir.pwd}/deps-#{flags.platform}"
-deps = build_deps_hash()
+Dir.chdir(flags.path) do
+  builder = DependencyBuilder.new(flags)
 
-builder = DependencyBuilder.new(deps, flags)
-
-if flags.libraries.empty?
-  builder.build_all
-else
-  builder.build_list flags.libraries
+  if flags.libraries.empty?
+    builder.build_all
+  else
+    builder.build_list flags.libraries
+  end
 end
