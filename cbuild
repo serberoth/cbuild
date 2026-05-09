@@ -171,38 +171,8 @@ class Builder
     attr_accessor :language, :language_cpp
     attr_accessor :prebuild, :postbuild
 
-    def initialize(flags)
-        extension = File.extname(flags.properties_file)
-        puts "#{"Loading Configuration File:".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
-        if '.yml' == extension || '.yaml' == extension then
-            if !File.exist? flags.properties_file
-                puts "#{'ERROR'.red}: Project YAML #{flags.properties_file.white.bold} does not exists in the current directory."
-                puts "Please make sure you are in the correct project directory and are specifying the correct project file."
-                exit -1
-            end
-    
-            begin
-                @properties = YAML.load(File.read(flags.properties_file))
-            rescue YAML::SyntaxError => e
-                puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{flags.properties_file.white.bold}"
-                puts "#{'ERROR'.red}: #{e.message}"
-                exit -1
-            end
-        else
-            if !File.exist? flags.properties_file
-                puts "#{'ERROR'.red}: Project JSON #{flags.properties_file.white.bold} does not exists in the current directory."
-                puts "Please make sure you are in the correct project directory and are specifying the correct project file."
-                exit -1
-            end
-    
-            begin
-                @properties = JSON.parse(File.read(flags.properties_file))
-            rescue JSON::JSONError => e
-                puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
-                puts "#{'ERROR'.red}: #{e.message}"
-                exit -1
-            end
-        end
+    def initialize flags
+        @properties = Builder.load_properties flags
         @flags = flags
 
         @host = OS.which?
@@ -218,20 +188,7 @@ class Builder
         end
 
         # Load a dependency file and build a map to the paths of those dependencies
-        # Support either a Hash with (key, value) relative path pairs or a `build-dep` configuration file as a String value
-        self.deps = @properties["deps"].clone || {}
-        # Override any provided deps file with the supplied parameter deps file
-        if flags.deps_file
-          self.deps = flags.deps_file
-        end
-
-        # TODO: Update build-deps to load JSON or YAML like cbuild instead of arbitrary ruby scripts
-        if self.deps.is_a? String
-            require "#{self.pwd}/#{self.deps}"
-            deps = build_deps_hash()
-            pwd = "#{self.pwd}/#{self.deps[0...self.deps.rindex('/')]}"
-            self.deps = deps.map{|key, val| [ key, "#{pwd}/#{val[:path]}" ]}.to_h
-        end
+        self.deps = Builder.load_dependencies(flags, @properties['deps'].clone || {}, self.pwd)
 
         # Build a property substitution hash this will replace any `${xxx}` in the source string with the value from the hash
         # This allows us to handle dependencies with version numbers in them in a single place, operating mode, target and
@@ -626,11 +583,88 @@ private
                 puts %x{ #{command} }
                 if !$?.exited? && ($?.exitstatus != 0)
                     puts "#{'ERROR'.red}: #{name} command #{command.white.bold} failed"
-                    exit -1
+                    exit! -1
                 end
             end
         end
         puts ""
+    end
+
+    def self.load_properties flags
+        puts "#{"Loading Configuration File:".yellow} #{flags.properties_file.white.bold}" if flags.verbose_flag
+        if !File.exist? flags.properties_file
+            puts "#{'ERROR'.red}: Project configuration #{flags.properties_file.white.bold} does not exists in the current directory."
+            puts "Please make sure you are in the correct project directory and are specifying the correct project file."
+            exit! -1
+        end
+
+        extension = File.extname(flags.properties_file)
+        if '.yml' == extension || '.yaml' == extension then
+            begin
+                return YAML.load(File.read(flags.properties_file))
+            rescue YAML::SyntaxError => e
+                puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{flags.properties_file.white.bold}"
+                puts "#{'ERROR'.red}: #{e.message}"
+                exit! -1
+            end
+        end
+
+        begin
+            return JSON.parse(File.read(flags.properties_file))
+        rescue JSON::JSONError => e
+            puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
+            puts "#{'ERROR'.red}: #{e.message}"
+            exit! -1
+        end
+    end
+
+    def self.load_dependencies flags, deps, pwd
+        # Override any provided dependency file with the supplied parameter dependency file
+        if flags.deps_file && flags.deps_file.is_a?(String)
+          deps = flags.deps_file
+        end
+
+        # Support either a Hash with (key, value) relative path pairs or a `build-dep` configuration file as a String value
+        # The property from the flags should always be a String
+        if deps.is_a? Hash
+          return deps
+        elsif !deps.is_a? String
+            puts "#{'ERROR'.red}: Unable to determine dependency configuration: #{deps}"
+            exit! -1
+        end
+
+        base_filename = "#{pwd}/#{deps}"
+        filenames = [ "#{base_filename}.yaml", "#{base_filename}.yml", "#{base_filename}.json" ]
+        filename = filenames.map {|name| File.exist?(name) ? name : nil } .select {|name| !name.nil? } .first
+
+        if filename.nil?
+            puts "#{'ERROR:'.red} :: The specified configuration file must exist: '#{deps.white.bold}' and must a YAML or JSON file", ''
+            exit! -1
+        end
+
+        extension = File.extname(filename)
+        pwd = "#{pwd}/#{deps[0...deps.rindex('/')]}"
+        deps = {}
+
+        if '.yml' == extension || '.yaml' == extension then
+            begin
+                deps = YAML.load(File.read(filename))
+            rescue YAML::SyntaxError => e
+                puts "#{'ERROR'.red}: Unable to correctly parse project YAML dependency configuration file: #{filename.white.bold}"
+                puts "#{'ERROR'.red}: #{e.message}"
+                exit! -1
+            end
+        else
+            begin
+                deps = JSON.parse(File.read(filename))
+            rescue JSON::JSONError => e
+                puts "#{'ERROR'.red}: Unable to correctly parse project JSON dependency configuration file: #{filename.white.bold}"
+                puts "#{'ERROR'.red}: #{e.message}"
+                exit! -1
+            end
+        end
+
+        return deps.map{|key, val| [ key, "#{pwd}/#{val['path']}" ]}.to_h
     end
 
 end
