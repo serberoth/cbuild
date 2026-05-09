@@ -66,6 +66,7 @@ class Flags
     attr_accessor :default_flag
     attr_accessor :verbose_flag
     attr_accessor :properties_file
+    attr_accessor :deps_file
     attr_accessor :build_mode
     attr_accessor :analyzer_mode
     attr_accessor :test_list
@@ -80,6 +81,7 @@ class Flags
         self.default_flag = true
         self.verbose_flag = false
         self.properties_file = 'build.json'
+        self.deps_file = nil
         self.build_mode = 'release'
         self.test_list = []
 
@@ -123,6 +125,10 @@ class Flags
                 self.properties_file = $1
             when /-f=(.*)/
                 self.properties_file = $1
+            when /--deps=(.*)/
+                self.deps_file = $1
+            when /-d=(.*)/
+                self.deps_file = $1
             when '--verbose'
                 self.verbose_flag = true
             when '-v'
@@ -146,6 +152,7 @@ class Flags
         puts 'test[<test>(,<test>...)] - Execute the project unit test suites for the specified suites'
         puts 'tasks - Print the build tasks list'
         puts '--filename=<filename> or -f=<filename> - Use <filename> for the build project properties'
+        puts '--deps=<filename> or -d=<filename> - Use <filename> for the project dependencies'
         puts '--verbose or -v - Enable verbose output'
         exit! 0
     end
@@ -154,7 +161,7 @@ end
 
 class Builder
     attr_accessor :target, :output, :mode
-    attr_accessor :pwd, :subs
+    attr_accessor :pwd, :deps, :subs
     attr_accessor :source_dirs, :source_allow_filters, :source_deny_filters
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
@@ -210,10 +217,26 @@ class Builder
             self.mode = 'release'
         end
 
+        # Load a dependency file and build a map to the paths of those dependencies
+        # Support either a Hash with (key, value) relative path pairs or a `build-dep` configuration file as a String value
+        self.deps = @properties["deps"].clone || {}
+        # Override any provided deps file with the supplied parameter deps file
+        if flags.deps_file
+          self.deps = flags.deps_file
+        end
+
+        # TODO: Update build-deps to load JSON or YAML like cbuild instead of arbitrary ruby scripts
+        if self.deps.is_a? String
+            require "#{self.pwd}/#{self.deps}"
+            deps = build_deps_hash()
+            pwd = "#{self.pwd}/#{self.deps[0...self.deps.rindex('/')]}"
+            self.deps = deps.map{|key, val| [ key, "#{pwd}/#{val[:path]}" ]}.to_h
+        end
+
         # Build a property substitution hash this will replace any `${xxx}` in the source string with the value from the hash
         # This allows us to handle dependencies with version numbers in them in a single place, operating mode, target and
         # output folders and the current working directory.
-        self.subs = @properties["deps"].clone || {}
+        self.subs = self.deps.clone
         self.subs['target'] = self.target
         self.subs['output'] = self.output
         self.subs['abs_target'] = "#{self.output}/exec/#{self.target}"
@@ -308,29 +331,24 @@ private
 
     def get_options type, mode
         if !@properties["#{type}.options"].nil?
+            options, mode_options = [], []
             if @properties["#{type}.options"].class == Array
                 options = @properties["#{type}.options"] || []
                 options = (options + (@properties["#{type}.#{@host}.options"] || [])).uniq
                 mode_options = @properties["#{type}.#{mode}.options"] || []
                 mode_options = (mode_options + (@properties["#{type}.#{mode}.#{@host}.options"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.test.options"] || [])).uniq) if @flags.test_flag
-                if !@properties["deps"].nil?
-                    options.map! {|opt| substitute_for(opt) }
-                    mode_options.map! {|opt| substitute_for(opt) }
-                end
-                return options, mode_options
             elsif @properties["#{type}.options"].class == Hash
                 options = @properties["#{type}.options"]['global'] || []
                 options = (options + (@properties["#{type}.options"]["global.#{@host}"] || [])).uniq
                 mode_options = @properties["#{type}.options"][mode] || []
                 mode_options = (mode_options + (@properties["#{type}.options"]["#{mode}.#{@host}"] || [])).uniq
                 (mode_options = (mode_options + (@properties["#{type}.options"]['test'] || [])).uniq) if @flags.test_flag
-                if !@properties["deps"].nil?
-                    options.map! {|opt| substitute_for(opt) }
-                    mode_options.map! {|opt| substitute_for(opt) }
-                end
-                return options, mode_options
             end
+
+            options.map! {|opt| substitute_for(opt) }
+            mode_options.map! {|opt| substitute_for(opt) }
+            return options, mode_options
         end
         return [], []
     end
