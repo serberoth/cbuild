@@ -154,7 +154,7 @@ class Flags
         puts '--filename=<filename> or -f=<filename> - Use <filename> for the build project properties'
         puts '--deps=<filename> or -d=<filename> - Use <filename> for the project dependencies'
         puts '--verbose or -v - Enable verbose output'
-        exit! 0
+        exit!(0)
     end
         
 end
@@ -583,7 +583,7 @@ private
                 puts %x{ #{command} }
                 if !$?.exited? && ($?.exitstatus != 0)
                     puts "#{'ERROR'.red}: #{name} command #{command.white.bold} failed"
-                    exit! -1
+                    exit!(-1)
                 end
             end
         end
@@ -595,7 +595,7 @@ private
         if !File.exist? flags.properties_file
             puts "#{'ERROR'.red}: Project configuration #{flags.properties_file.white.bold} does not exists in the current directory."
             puts "Please make sure you are in the correct project directory and are specifying the correct project file."
-            exit! -1
+            exit!(-1)
         end
 
         extension = File.extname(flags.properties_file)
@@ -605,7 +605,7 @@ private
             rescue YAML::SyntaxError => e
                 puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{flags.properties_file.white.bold}"
                 puts "#{'ERROR'.red}: #{e.message}"
-                exit! -1
+                exit!(-1)
             end
         end
 
@@ -614,7 +614,7 @@ private
         rescue JSON::JSONError => e
             puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{flags.properties_file.white.bold}"
             puts "#{'ERROR'.red}: #{e.message}"
-            exit! -1
+            exit!(-1)
         end
     end
 
@@ -630,7 +630,7 @@ private
           return deps
         elsif !deps.is_a? String
             puts "#{'ERROR'.red}: Unable to determine dependency configuration: #{deps}"
-            exit! -1
+            exit!(-1)
         end
 
         base_filename = "#{pwd}/#{deps}"
@@ -639,7 +639,7 @@ private
 
         if filename.nil?
             puts "#{'ERROR:'.red} :: The specified configuration file must exist: '#{deps.white.bold}' and must a YAML or JSON file", ''
-            exit! -1
+            exit!(-1)
         end
 
         extension = File.extname(filename)
@@ -652,7 +652,7 @@ private
             rescue YAML::SyntaxError => e
                 puts "#{'ERROR'.red}: Unable to correctly parse project YAML dependency configuration file: #{filename.white.bold}"
                 puts "#{'ERROR'.red}: #{e.message}"
-                exit! -1
+                exit!(-1)
             end
         else
             begin
@@ -660,7 +660,7 @@ private
             rescue JSON::JSONError => e
                 puts "#{'ERROR'.red}: Unable to correctly parse project JSON dependency configuration file: #{filename.white.bold}"
                 puts "#{'ERROR'.red}: #{e.message}"
-                exit! -1
+                exit!(-1)
             end
         end
 

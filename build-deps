@@ -335,7 +335,7 @@ class Flags
     puts '--downstream - Ensure downstream libraries are built after building selected libraries'
     puts '<library> - Build the specified dependency library and its downstream libraries'
     puts '--verbose or -v - Enable verbose output'
-    exit! -1
+    exit!(-1)
   end
     
 end
@@ -484,7 +484,7 @@ private
       rescue YAML::SyntaxError => e
           puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{filename.white.bold}"
           puts "#{'ERROR'.red}: #{e.message}"
-          exit! -1
+          exit!(-1)
       end
     end
 
@@ -493,7 +493,7 @@ private
     rescue JSON::JSONError => e
         puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{filename.white.bold}"
         puts "#{'ERROR'.red}: #{e.message}"
-        exit! -1
+        exit!(-1)
     end
   end
 
