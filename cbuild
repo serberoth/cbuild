@@ -165,7 +165,7 @@ class Builder
     attr_accessor :source_dirs, :source_allow_filters, :source_deny_filters
     attr_accessor :test_dir, :test_list
     attr_accessor :compiler, :compiler_options, :compiler_mode_options
-    attr_accessor :linker, :linker_options, :linker_mode_options
+    attr_accessor :linker, :linker_test, :linker_options, :linker_mode_options
     attr_accessor :analyzer, :analyzer_options, :analyzer_mode_options
     # attr_accessor :profiler, :profiler_options, :profiler_mode_options
     attr_accessor :language, :language_cpp
@@ -202,10 +202,11 @@ class Builder
 
         self.compiler = @properties['cc'] || 'cc'
         self.linker = @properties['ld'] || 'ld'
+        self.linker_test = @properties['ld.test'] || self.linker
         self.analyzer = @properties['analyzer'] || ''
         # self.profiler = @properties['profiler'] || ''
-        self.language = @properties['language'] || @properties['language.c'] || 'c17'
-        self.language_cpp = @properties['language.cpp'] || 'c++17'
+        self.language = @properties['language'] || @properties['language.c'] || 'c23'
+        self.language_cpp = @properties['language.cpp'] || 'c++23'
 
         self.source_dirs = @properties['sources'] || [ './' ]
         self.source_allow_filters = get_filters(nil) + get_filters('allow')
@@ -449,7 +450,7 @@ private
         if $?.exited? && ($?.exitstatus == 0)
             puts "#{'Linking Target'.yellow}: #{target.white.bold}"
             options = [ self.linker_options.join(' '), self.linker_mode_options.join(' ') ].join(' ')
-            command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{object} #{options}"
+            command = "#{self.linker_test} -o #{target} #{object_list.join(' ')} #{object} #{options}"
             puts command.cyan if verbose
             puts %x{ #{command} }
         end
