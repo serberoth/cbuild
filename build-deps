@@ -200,6 +200,7 @@ class CommandExecutor
 
   def execute
     commands = []
+    puts "DIRECTORY: #{@dir}"
     Dir.chdir(@dir) do
       @commands.each do |cmd|
         pwd = Dir.pwd
@@ -226,11 +227,12 @@ class CommandExecutor
   end
 
   def to_s
-    "cd #{@dir} => [ #{@commands[0].length > 20 ? @commands[0][0..20] : commands[0]} ... ]"
+    "cd #{@dir} => [ #{@commands[0].length > 20 ? @commands[0][0..20] : @commands[0]} ... ]"
   end
 
   def self.from_h hash
     if hash['type'] == 'CommandList'
+      # path = "#{Dir.pwd}/#{hash['rel_path']}" || "#{hash['abs_path']}"
       return CommandExecutor.new(hash['rel_path'], hash['commands'], {})
     end
     return nil
