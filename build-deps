@@ -200,7 +200,6 @@ class CommandExecutor
 
   def execute
     commands = []
-    puts "DIRECTORY: #{@dir}"
     Dir.chdir(@dir) do
       @commands.each do |cmd|
         pwd = Dir.pwd
