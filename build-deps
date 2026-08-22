@@ -480,7 +480,7 @@ private
 
     if '.yml' == extension || '.yaml' == extension then
       begin
-        return YAML.load(File.read(filename)), filename
+        return YAML.load(File.read(filename)), filename[0...-extension.length]
       rescue YAML::SyntaxError => e
           puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{filename.white.bold}"
           puts "#{'ERROR'.red}: #{e.message}"
@@ -489,7 +489,7 @@ private
     end
 
     begin
-        return JSON.parse(File.read(filename)), filename
+        return JSON.parse(File.read(filename)), filename[0...-extension.length]
     rescue JSON::JSONError => e
         puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{filename.white.bold}"
         puts "#{'ERROR'.red}: #{e.message}"
