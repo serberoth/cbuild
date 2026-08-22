@@ -340,7 +340,7 @@ end
 
 class DependencyBuilder
   def initialize flags
-    @dependency_map = DependencyBuilder.load_properties(flags)
+    @dependency_map, @filename = DependencyBuilder.load_properties(flags)
     @flags = flags
   end
 
@@ -402,6 +402,7 @@ private
     subs = @dependency_map.transform_values{|val| val['path'] }
     subs.update(@dependency_map.map{|key, val| [ "#{key}>>path", "#{Dir.pwd}/#{val['path']}" ]}.to_h)
     subs['output'] = output
+    subs['self'] = @filename
 
     if configuration['repository'] && configuration['archive']
       puts "#{'ERROR'.red} Configuration cannot have repository and archive fields" if !result
@@ -478,7 +479,7 @@ private
 
     if '.yml' == extension || '.yaml' == extension then
       begin
-        return YAML.load(File.read(filename))
+        return YAML.load(File.read(filename)), filename
       rescue YAML::SyntaxError => e
           puts "#{'ERROR'.red}: Unable to correctly parse project YAML configuration file: #{filename.white.bold}"
           puts "#{'ERROR'.red}: #{e.message}"
@@ -487,7 +488,7 @@ private
     end
 
     begin
-        return JSON.parse(File.read(filename))
+        return JSON.parse(File.read(filename)), filename
     rescue JSON::JSONError => e
         puts "#{'ERROR'.red}: Unable to correctly parse project JSON configuration file: #{filename.white.bold}"
         puts "#{'ERROR'.red}: #{e.message}"
