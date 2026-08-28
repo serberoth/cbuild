@@ -496,6 +496,8 @@ private
             # This just feels like a total hack to get static libraries working....
             if self.linker == 'ar' then
                 command = "#{self.linker} cru #{target} #{object_list.join(' ')} #{options} && ranlib #{target}"
+            elsif self.liner == 'libtool' then
+                command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options}"
             else
                 command = "#{self.linker} -o #{target} #{object_list.join(' ')} #{options} #{include_dirs}"
             end
