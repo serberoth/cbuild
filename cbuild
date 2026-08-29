@@ -101,6 +101,7 @@ class Flags
             when /build:(.*)/
                 self.build_flag = true
                 self.build_mode = $1
+                self.build_mode = 'release' if self.build_mode == 'global'
                 self.default_flag = false
             when 'analyze'
                 self.analyze_flag = true
@@ -114,9 +115,11 @@ class Flags
             #     self.default_flag = false
             when 'test'
                 self.test_flag = true
+                self.build_mode = 'test'
                 self.default_flag = false
             when /test\[([^\]]*)\]/
                 self.test_flag = true
+                self.build_mode = 'test'
                 self.default_flag = false
                 self.test_list = $1.split(',').each{|s| s.strip!}.keep_if{|s| !s.nil? && !s.empty? }
             when 'tasks'
@@ -181,11 +184,6 @@ class Builder
         self.target = @properties['target'] || 'output'
         self.output = @properties['output'] || './build'
         self.mode = flags.build_mode
-        if flags.test_flag
-            self.mode = 'debug'
-        elsif self.mode == 'global'
-            self.mode = 'release'
-        end
 
         # Load a dependency file and build a map to the paths of those dependencies
         self.deps = Builder.load_dependencies(flags, @properties['deps'].clone || {}, self.pwd)
@@ -288,27 +286,28 @@ private
     end
 
     def get_options type, mode
-        if !@properties["#{type}.options"].nil?
-            options, mode_options = [], []
-            if @properties["#{type}.options"].class == Array
-                options = @properties["#{type}.options"] || []
-                options = (options + (@properties["#{type}.#{@host}.options"] || [])).uniq
-                mode_options = @properties["#{type}.#{mode}.options"] || []
-                mode_options = (mode_options + (@properties["#{type}.#{mode}.#{@host}.options"] || [])).uniq
-                (mode_options = (mode_options + (@properties["#{type}.test.options"] || [])).uniq) if @flags.test_flag
-            elsif @properties["#{type}.options"].class == Hash
-                options = @properties["#{type}.options"]['global'] || []
-                options = (options + (@properties["#{type}.options"]["global.#{@host}"] || [])).uniq
-                mode_options = @properties["#{type}.options"][mode] || []
-                mode_options = (mode_options + (@properties["#{type}.options"]["#{mode}.#{@host}"] || [])).uniq
-                (mode_options = (mode_options + (@properties["#{type}.options"]['test'] || [])).uniq) if @flags.test_flag
-            end
+        options, mode_options = [], []
+        if @properties.has_key?("#{type}.options") && @properties["#{type}.options"].class == Hash
+            # global options for this type and host
+            options = @properties["#{type}.options"]['global'] || []
+            options = (options + (@properties["#{type}.options"]["global.#{@host}"] || [])).uniq
 
-            options.map! {|opt| substitute_for(opt) }
-            mode_options.map! {|opt| substitute_for(opt) }
-            return options, mode_options
+            # mode options for this type: mode and host
+            mode_options = @properties["#{type}.options"][mode] || []
+            mode_options = (mode_options + (@properties["#{type}.options"]["#{mode}.#{@host}"] || [])).uniq
+        else
+            # global options for this type and host
+            options = @properties["#{type}.options"] || []
+            options = (options + (@properties["#{type}.#{@host}.options"] || [])).uniq
+
+            # mode options for this type: mode and host
+            mode_options = @properties["#{type}.#{mode}.options"] || []
+            mode_options = (mode_options + (@properties["#{type}.#{mode}.#{@host}.options"] || [])).uniq
         end
-        return [], []
+
+        options.map! {|opt| substitute_for(opt) }
+        mode_options.map! {|opt| substitute_for(opt) }
+        return options, mode_options
     end
 
     def exec_prebuild
