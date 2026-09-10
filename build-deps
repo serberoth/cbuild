@@ -82,28 +82,24 @@ end
 class Extractor
   include Command
 
-  attr_accessor :archive
-
-  def initialize(archive, path, extension)
-    @archive = archive
-    @path = path
-    @extension = extension
+  def initialize(src_path, dst_path)
+    @src_path = src_path
+    @dst_path = dst_path
   end
 
   def substitute subs, pwd
   end
 
   def execute
-    archive = "#{@path}#{@archive}#{@extension}"
-    out_path = "#{Dir.pwd}/#{@archive}"
-    if !Dir.exist?(out_path)
-      puts "Extracting archive '#{archive}' did not previously exist at '#{out_path}'"
-      puts %x{ tar -zxf \"#{archive}\" }
+    puts "Extracting '#{@src_path}' into '#{@dst_path}'"
+    if !Dir.exist?(@dst_path) || Dir.empty?(@dst_path)
+      Dir.mkdir(@dst_path) if !Dir.exist?(@dst_path)
+      puts %x{ tar -zxf \"#{@src_path}\" --cd \"#{@dst_path}\" }
       result = $?.exited? && ($?.exitstatus == 0)
       return result
     end
 
-    puts "Archive '#{archive}' previously extracted to '#{out_path}'"
+    puts "Archive previously extracted to '#{@dst_path}'"
     return true
   end
 
@@ -112,7 +108,7 @@ end
 class CloneCommand
   include Command
 
-  attr_accessor :repository
+  attr_reader :repository
 
   def initialize(repository, path)
     @repository = repository
@@ -144,7 +140,7 @@ class CloneCommand
 
 end
 
-class EnvSetter
+class EnvVar
   include Command
 
   def initialize(name, value)
@@ -173,23 +169,63 @@ class EnvSetter
 
   def self.from_h hash
     if hash['type'] == 'EnvVar'
-      return EnvSetter.new(hash['key'], hash['value'])
+      return EnvVar.new(hash['key'], hash['value'])
     end
     return nil
   end
 
 end
 
+class Environment
+  include Command
+
+  def initialize(hash)
+    @hash = hash
+    @subs = hash.clone
+    @original = @hash.filter_map {|key, val| [ key, ENV[key] ] if ENV.key?(key) }.to_h
+  end
+
+  def substitute subs, pwd
+    @subs = @hash.transform_values{|val| substitute_for(val, subs, pwd) }
+  end
+
+  def execute
+    @subs.each{|key, val| ENV[key] = val }
+    return true
+  end
+
+  def cleanup
+    @original.each{|key, val| ENV[key] = val }
+    (@subs.keys - @original.keys).each{|key| ENV[key] = nil }
+    return true
+  end
+
+  def to_s
+    "ENV[ #{@subs.map{|key, val| "#{key} <= \"#{val}\"" }.join(', ')} ]"
+  end
+
+  def self.from_h hash
+    if hash['type'] == 'Environment'
+      return Environment.new(hash['data'])
+    end
+    return nil
+  end
+
+end
+
+
 class CommandExecutor
   include Command
 
-  COMMAND_SET = [ EnvSetter, CommandExecutor ]
+  COMMAND_SET = [ EnvVar, Environment, CommandExecutor ]
 
-  attr_accessor :dir, :subs
+  attr_reader :dir, :subs
   
-  def initialize(dir, commands, subs = {})
+  def initialize(dir, commands, environment, subs = {})
     @dir = dir
     @commands = commands
+    @executed = []
+    @environment = Environment.new(environment)
     @subs = subs
   end
 
@@ -199,8 +235,9 @@ class CommandExecutor
   end
 
   def execute
-    commands = []
     Dir.chdir(@dir) do
+      @environment.execute
+
       @commands.each do |cmd|
         pwd = Dir.pwd
         if cmd.is_a? String
@@ -210,10 +247,10 @@ class CommandExecutor
           puts "#{'FAILED'.red} :: #{cmd.yellow}" if command.nil?
           return false if command.nil?
 
-          commands << command
+          @executed << command
           return false if !self.execute_command(command, pwd)
         elsif cmd.is_a? Command
-          commands << cmd
+          @executed << cmd
           return fale if !self.execute_command(cmd, pwd)
         elsif cmd.is_a? Proc
           return false if !self.execute_proc(cmd, pwd)
@@ -221,8 +258,12 @@ class CommandExecutor
       end
     end
   
-    commands.each{|command| command.cleanup }
     return true
+  end
+
+  def cleanup
+    @executed.each{|command| command.cleanup }
+    @environment.cleanup
   end
 
   def to_s
@@ -273,49 +314,49 @@ end
 
 
 class Flags
-  attr_accessor :platform
-  attr_accessor :path
-  attr_accessor :clean_flag
-  attr_accessor :ensure_upstream
-  attr_accessor :ensure_downstream
-  attr_accessor :build_flag
-  attr_accessor :libraries
-  attr_accessor :help_flag
-  attr_accessor :verbose_flag
+  attr_reader :platform
+  attr_reader :path
+  attr_reader :clean_flag
+  attr_reader :ensure_upstream
+  attr_reader :ensure_downstream
+  attr_reader :build_flag
+  attr_reader :libraries
+  attr_reader :help_flag
+  attr_reader :verbose_flag
 
   def initialize(arguments)
-    self.platform = ''
-    self.path = Dir.pwd
-    self.clean_flag = false
-    self.ensure_upstream = false
-    self.ensure_downstream = false
-    self.build_flag = true
-    self.libraries = []
-    self.help_flag = false
-    self.verbose_flag = false
+    @platform = ''
+    @path = Dir.pwd
+    @clean_flag = false
+    @ensure_upstream = false
+    @ensure_downstream = false
+    @build_flag = true
+    @libraries = []
+    @help_flag = false
+    @verbose_flag = false
 
     arguments.each do |item|
       case item
       when '--clean'
-        self.clean_flag = true
+        @clean_flag = true
       when '--upstream'
-        self.ensure_upstream = true
+        @ensure_upstream = true
       when '--downstream'
-        self.ensure_downstream = true
+        @ensure_downstream = true
       when /--platform=(.*)/
-        self.platform = $1.lstrip.rstrip
+        @platform = $1.lstrip.rstrip
       when /-p=(.*)/
-        self.platform = $1.lstrip.rstrip
+        @platform = $1.lstrip.rstrip
       when /--path=(.*)/
-        self.path = $1.lstrip.rstrip
+        @path = $1.lstrip.rstrip
       when '--help'
-        self.help_flag = true
+        @help_flag = true
       when '--verbose'
-        self.verbose_flag = true
+        @verbose_flag = true
       when '-v'
-        self.verbose_flag = true
+        @verbose_flag = true
       else
-        self.libraries << item
+        @libraries << item
       end
     end
   end
@@ -339,10 +380,137 @@ class Flags
     
 end
 
+module DependencyKind
+  OTHER = 0
+  REPOSITORY = 1
+  ARCHIIVE = 2
+end
+
+class Dependency
+  attr_reader :target
+  attr_reader :path, :output
+  attr_reader :depends
+  attr_reader :kind
+  attr_reader :repository, :archive
+  attr_reader :environment
+  attr_reader :clean, :build
+  attr_accessor :built
+
+  attr_reader :working
+
+  def initialize target, configuration
+    @target = target
+    @path = configuration['path']
+    @output = configuration['output']
+    @depends = configuration['depends'] || []
+    @kind = !configuration['repository'].nil? ? DependencyKind::REPOSITORY : (!configuration['archive'].nil? ? DependencyKind::ARCHIIVE : DependencyKind::OTHER)
+    @repository = configuration['repository']
+    @archive = configuration['archive']
+    @environment = configuration['environment'] || {}
+    @clean = configuration['clean'] || []
+    @build = configuration['build'] || []
+    self.built = false
+
+    @working = "#{Dir.pwd}/#{self.path || self.target}"
+  end
+
+  def get_path
+    return self.path || self.target
+  end
+
+  def is_valid?
+    return !self.target.nil? && !self.output.nil? && (self.repository.nil? || self.archive.nil?)
+  end
+
+  def is_target? target
+    return true if (self.target == target) || (self.path == target)
+    false
+  end
+
+  def get_downstream dependency_map
+    dependency_map.filter_map{|target, dependency| [ target, dependency ] if (self.target != target) && dependency.depends.include?(self.target) }.to_h
+  end
+
+  def get_downstream_targets dependency_map
+    dependency_map.filter_map{|target, dependency| target if (self.target != target) && dependency.depends.include?(self.target) }
+  end
+
+  def get_upstream dependency_map
+    dependency_map.filter_map{|target, dependency| [ target, dependency ] if (self.target != target) && self.depends.include?(target) }.to_h
+  end
+
+  def get_upstream_targets dependency_map
+    self.depends
+  end
+
+  def get_working
+    return "#{self.working}#{self.archive_name}"
+  end
+
+  def get_output
+    return "#{self.working}#{self.archive_name}/#{self.output}"
+  end
+
+  def obtain system_dir
+    if self.repository
+      result = CloneCommand.new(self.repository, self.working).execute
+      puts "#{'ERROR'.red} Failed to clone repository #{self.repository.cyan}" if !result
+      return false if !result
+    elsif self.archive
+      src_path = self.archive_src_path system_dir
+      dst_path = self.archvie_dst_path
+
+      result = Extractor.new(src_path, dst_path).execute
+      puts "#{'ERROR'.red} Failed to extract archive #{src_path.cyan} at #{dst_path.magenta}" if !result
+      return false if !result
+    else
+      if !Dir.exist?(self.working)
+        puts "Creating working directory #{self.working.cyan}"
+        Dir.mkdir(self.working)
+      end
+    end
+
+    return true
+  end
+
+private
+  def archive_name
+    if self.archive.is_a?(String)
+      return "/#{self.get_path}"
+    end
+    if self.archive.is_a?(Hash)
+      return "/#{self.archive['name']}"
+    end
+    return ''
+  end
+  
+  def archive_src_path system_dir
+    if self.archive.is_a?(String)
+      return "#{system_dir}/#{"#{self.archive}/" || ''}#{self.get_path}.tar.gz"
+    elsif self.archive.is_a?(Hash)
+      return "#{system_dir}/#{self.archive['path'] || ''}/#{self.archive['name']}.#{self.archive['extension'] || 'tar.gz'}"
+    end
+    return nil
+  end
+
+  def archvie_dst_path
+    return "#{@working}"
+  end
+
+end
+
 class DependencyBuilder
   def initialize flags
     @dependency_map, @filename = DependencyBuilder.load_properties(flags)
+    @before_each = @dependency_map['--before-each']
+    @after_each = @dependency_map['--after-each']
+    @dependency_map = @dependency_map.filter_map{|key, val| [ key, Dependency.new(key, val) ] unless (key == '--before-each') || (key == '--after-each') }.to_h
     @flags = flags
+    @system_dir = Dir.pwd
+
+    @subs = @dependency_map.transform_values{|val| val.get_working }
+    @subs.update(@dependency_map.filter_map{|key, val| [ "#{key}::path", "#{val.get_path}" ] unless (key == '--before-each') || (key == '--after-each') }.to_h)
+    @subs.update(@dependency_map.filter_map{|key, val| [ "#{key}::output", "#{val.get_output}" ] unless (key == '--before-each') || (key == '--after-each') }.to_h)
   end
 
   def build_single target
@@ -354,116 +522,105 @@ class DependencyBuilder
   end
 
   def build_list targets
-    built = {}
-    result = build_multiple_targets targets, built
-    puts '', "Built Dependencies: #{built_to_s(built)}" unless built.empty?
-    # return true
+    result = build_multiple_targets targets
+    built_list = @dependency_map.filter_map{|target, dependency| target if dependency.built }
+    puts '', "Built Dependencies: #{built_list.join(', ')}" unless built_list.empty?
     return result
   end
 
 private
-  def build_single_target target, built, upstream_override
-    # If we are provided with a path then find a matching target key entry for that path
-    alt = @dependency_map.select {|key, val| val['path'] == target }
-    if alt != nil && alt.length > 0
-      puts "Building Dependency #{alt.keys.first.cyan} from given path #{target.magenta}"
-      target = alt.keys.first
-    end
+  def build_single_target target, upstream_override
+    return true if target == '--before-each' || target == '--after-each'
 
-    if !@dependency_map.key?(target) then
-      puts "#{'FAILED'.red} :: No such dependency `#{target.yellow}`"
+    # If we are provided with a path then find a matching target key entry for that path
+    configuration = @dependency_map.filter_map {|_, dependency| dependency if dependency.is_target?(target) }.first
+    if configuration.nil? then
+      puts "#{'FAILED'.red} :: No such dependency `#{target.yellow}` or path to dependency"
+      return false
+    end
+    puts "Building Dependency #{configuration.target.cyan} from given path #{target.magenta}" if target == configuration.path
+
+    if !configuration.is_valid? then
+      if configuration.repository && configuration.archive then
+        puts "#{'ERROR'.red} Configuration for #{configuration.target.yellow} cannot have repository and archive fields" if !result
+        return false
+      else
+        puts "#{'FAILED'.red} :: configuration for #{configuraiton.target.yellow} is not valid"
+      end
       return false
     end
 
-    configuration = @dependency_map[target]
-
-    return false unless build_multiple_targets(configuration['depends'] || [], built, upstream_override) if @flags.ensure_upstream || upstream_override
+    return false unless build_multiple_targets(configuration.get_upstream_targets(@dependency_map), upstream_override) if @flags.ensure_upstream || upstream_override
     
-    puts "Target #{target} already built" if built.key?(target) && @flags.verbose_flag
-    return true if built.key?(target)
+    puts "Target #{configuration.target} already built" if configuration.built && @flags.verbose_flag
+    return true if configuration.built
 
-    puts "Assembling dependency: #{target.cyan}"
+    puts "Assembling dependency: #{configuration.target.cyan}"
+    puts "Working Directory: #{configuration.get_working.yellow}" if @flags.verbose_flag
+    puts "Output Directory: #{configuration.get_output.yellow}" if @flags.verbose_flag
     result = false
-    path = configuration['path'] || target
-    pwd = "#{Dir.pwd}/#{path}"
-    puts "Working Directory: #{pwd}" if @flags.verbose_flag
-    output = configuration['output']
-    output = output.gsub(/\$\{pwd\}/, pwd)
-    @dependency_map.each do |key, val|
-        output = output.gsub(/\$\{#{key}\}/, (val['path'] || key))
-    end
 
-    if Dir.exist?(output) && !@flags.clean_flag
-      puts "Output directory #{output} exists for target #{target}" if @flags.verbose_flag
-      puts "#{'SUCCESS:'.blue} :: #{target.cyan} :: #{output}"
-      built[target] = true
+    if Dir.exist?(configuration.get_output) && !@flags.clean_flag
+      puts "Output directory #{configuration.get_output} exists for target #{configuration.target}" if @flags.verbose_flag
+      puts "#{'SUCCESS:'.blue} :: #{configuration.target.cyan} :: #{configuration.get_output}"
+      configuration.built = true
       return true
     end
 
-    subs = @dependency_map.transform_values{|val| val['path'] }
-    subs.update(@dependency_map.map{|key, val| [ "#{key}>>path", "#{Dir.pwd}/#{val['path']}" ]}.to_h)
-    subs['output'] = output
+    subs = @subs.clone()
+    subs.each{|key, val| puts "SUB `#{key}` :: `#{val}`"}
+    subs['output'] = configuration.get_output
+    subs['pwd'] = configuration.get_working
+    subs['system'] = @system_dir
     subs['self'] = @filename
 
-    if configuration['repository'] && configuration['archive']
-      puts "#{'ERROR'.red} Configuration cannot have repository and archive fields" if !result
-      return false
+    return false if !configuration.obtain @system_dir
+
+    environment = configuration.environment
+
+    puts "PWD: #{configuration.get_working}"
+    puts "DST: #{configuration.get_output}"
+
+    if @before_each && !@before_each.empty?
+      puts "Before Each: #{target.cyan}"
+      result = CommandExecutor.new(configuration.get_working, @before_each, environment, subs).execute
+      puts "#{'ERROR:'.red} Before each build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
+      return false unless result
     end
 
-    if configuration['repository']
-      result = CloneCommand.new(configuration['repository'], pwd).execute
-      puts "#{'ERROR'.red} Failed to clone repository #{configuration['repository'].cyan}" if !result
-      return false if !result
-    elsif configuration['archive']
-      archive, archive_path, archive_extension = nil, nil, nil
-      (archive, archive_path = path, configuration['archive']) if configuration['archive'].is_a?(String)
-      (archive, archive_path, archive_extension = configuration['archive']['name'], configuration['archive']['path'], configuration['archive']['extension']) if configuration['archive'].is_a?(Hash)
-      archive_path = "#{Dir.pwd}/#{archive_path}"
-      archive_extension = '.tar.gz' if archive_extension.nil?
-      puts "Extracting archive #{archive.cyan}#{archive_extension.cyan} at #{archive_path.magenta}"
-      result = Extractor.new(archive, archive_path, archive_extension).execute
-      puts "#{'ERROR'.red} Failed to extract archive #{archive.cyan}#{archive_extension.cyan} at #{archive_path.magenta}" if !result
-      return false if !result
-    end
-
-    result = CommandExecutor.new(pwd, configuration['clean'], subs).execute if @flags.clean_flag
+    puts "Clean Step: #{target.cyan}" if @flags.clean_flag
+    result = CommandExecutor.new(configuration.get_working, configuration.clean, environment, subs).execute if @flags.clean_flag
     puts "#{'ERROR:'.red} Clean commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.clean_flag && @flags.verbose_flag
     return false if !result && @flags.clean_flag
 
-    result = CommandExecutor.new(pwd, configuration['build'], subs).execute if @flags.build_flag
+    puts "Build Step: #{target.cyan}"
+    result = CommandExecutor.new(configuration.get_working, configuration.build, environment, subs).execute if @flags.build_flag
     puts "#{'ERROR:'.red} Build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
     puts "#{'SUCCESS:'.green} :: #{target.cyan}" if result
     return false unless result
 
-    return false unless build_multiple_targets(get_downstream(target), built, upstream_override || true) if @flags.ensure_downstream
+    if @after_each && !@after_each.empty?
+      puts "After Each: #{target.cyan}"
+      result = CommandExecutor.new(pwd, @after_each, environment, subs).execute
+      puts "#{'ERROR:'.red} After each build commands for #{target.cyan} returned #{'false'.magenta}" if !result && @flags.verbose_flag
+      return false unless result
+    end
+    
+    return false unless build_multiple_targets(configuration.get_downstream_targets(@dependency_map), upstream_override || true) if @flags.ensure_downstream
 
-    built[target] = true
+    configuration.built = true
     return true
   end
 
-  def build_multiple_targets targets, built, upstream_override = false
+  def build_multiple_targets targets, upstream_override = false
     return true if targets.empty?
     targets.each do |target|
       matches = /(\.\\)?([^\\\/]+)[\\\/]?$/.match(target)
       target = matches[2] unless matches.nil?
 
-      return false unless build_single_target(target, built, upstream_override)
+      return false unless build_single_target(target, upstream_override)
     end
     return true
-  end
-
-  def get_downstream target
-    downstream = []
-    @dependency_map.each{|name, dependency|
-      next if target == name
-      depends = dependency['depends']
-      downstream << name unless depends.nil? || !depends.include?(target)
-    }
-    return downstream
-  end
-
-  def built_to_s built
-    return "#{built.keys.map{|target| target.cyan }.join(', ')}"
   end
 
   def self.load_properties flags
