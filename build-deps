@@ -94,7 +94,7 @@ class Extractor
     puts "Extracting '#{@src_path}' into '#{@dst_path}'"
     if !Dir.exist?(@dst_path) || Dir.empty?(@dst_path)
       Dir.mkdir(@dst_path) if !Dir.exist?(@dst_path)
-      puts %x{ tar -zxf \"#{@src_path}\" --cd \"#{@dst_path}\" }
+      puts %x{ tar -zxf \"#{@src_path}\" -C \"#{@dst_path}\" }
       result = $?.exited? && ($?.exitstatus == 0)
       return result
     end
