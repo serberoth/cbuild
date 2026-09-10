@@ -666,7 +666,18 @@ private
             end
         end
 
-        return deps.map{|key, val| [ key, "#{pwd}/#{val['path']}" ]}.to_h
+        return (deps.map do |key, val|
+            working = "#{pwd}/#{val['path'] || val['target']}"
+            archive_name = if val['archive'].is_a?(String)
+                "/#{val['path'] || val['target']}"
+            elsif val['archive'].is_a?(Hash)
+                "/#{val['archive']['name']}"
+            else
+                ''
+            end
+
+            [ key, "#{working}#{archive_name}" ]
+        end).to_h
     end
 
 end
