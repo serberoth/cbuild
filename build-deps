@@ -568,7 +568,6 @@ private
     end
 
     subs = @subs.clone()
-    subs.each{|key, val| puts "SUB `#{key}` :: `#{val}`"}
     subs['output'] = configuration.get_output
     subs['pwd'] = configuration.get_working
     subs['system'] = @system_dir
@@ -577,9 +576,6 @@ private
     return false if !configuration.obtain @system_dir
 
     environment = configuration.environment
-
-    puts "PWD: #{configuration.get_working}"
-    puts "DST: #{configuration.get_output}"
 
     if @before_each && !@before_each.empty?
       puts "Before Each: #{target.cyan}"

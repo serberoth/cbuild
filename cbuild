@@ -157,7 +157,7 @@ class Flags
         puts '--filename=<filename> or -f=<filename> - Use <filename> for the build project properties'
         puts '--deps=<filename> or -d=<filename> - Use <filename> for the project dependencies'
         puts '--verbose or -v - Enable verbose output'
-        exit!(0)
+        exit!(-1)
     end
         
 end
@@ -181,12 +181,12 @@ class Builder
         @host = OS.which?
 
         self.pwd = Dir.pwd
-        self.target = @properties['target'] || 'output'
+        self.target = @properties["target.#{@host}"] || @properties['target'] || 'output'
         self.output = @properties['output'] || './build'
         self.mode = flags.build_mode
 
         # Load a dependency file and build a map to the paths of those dependencies
-        self.deps = Builder.load_dependencies(flags, @properties['deps'].clone || {}, self.pwd)
+        self.deps = Builder.load_dependencies(flags, @properties["deps.#{@host}"] || @properties['deps'] || {}, self.pwd)
 
         # Build a property substitution hash this will replace any `${xxx}` in the source string with the value from the hash
         # This allows us to handle dependencies with version numbers in them in a single place, operating mode, target and
@@ -198,8 +198,8 @@ class Builder
         self.subs['mode'] = self.mode
         self.subs['pwd'] = self.pwd
 
-        self.compiler = @properties['cc'] || 'cc'
-        self.linker = @properties['ld'] || 'ld'
+        self.compiler = @properties["cc.#{@host}"] || @properties['cc'] || 'cc'
+        self.linker = @properties["ld.#{@host}"] || @properties['ld'] || 'ld'
         self.linker_test = @properties['ld.test'] || self.linker
         self.analyzer = @properties['analyzer'] || ''
         # self.profiler = @properties['profiler'] || ''
@@ -629,7 +629,7 @@ private
         # Support either a Hash with (key, value) relative path pairs or a `build-dep` configuration file as a String value
         # The property from the flags should always be a String
         if deps.is_a? Hash
-          return deps
+          return deps.clone
         elsif !deps.is_a? String
             puts "#{'ERROR'.red}: Unable to determine dependency configuration: #{deps}"
             exit!(-1)
